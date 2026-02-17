@@ -15,19 +15,23 @@ OUT_FILE = os.path.join(OUT_DIR, "evaluation.json")
 FEATURES = ["sepal_length", "sepal_width", "petal_length", "petal_width"]
 LABEL_COL = "species"
 
+
 def find_model_tar() -> str:
     candidate = os.path.join(MODEL_INPUT_DIR, "model.tar.gz")
     if os.path.exists(candidate):
         return candidate
+
     tars = [os.path.join(MODEL_INPUT_DIR, f) for f in os.listdir(MODEL_INPUT_DIR) if f.endswith(".tar.gz")]
     if not tars:
         raise FileNotFoundError(f"No model tar.gz found in {MODEL_INPUT_DIR}. Contents: {os.listdir(MODEL_INPUT_DIR)}")
     return tars[0]
 
+
 def extract_tar(tar_path: str):
     os.makedirs(EXTRACT_DIR, exist_ok=True)
     with tarfile.open(tar_path, "r:gz") as tar:
         tar.extractall(EXTRACT_DIR)
+
 
 def find_file(name: str) -> str:
     for root, _, files in os.walk(EXTRACT_DIR):
@@ -35,9 +39,11 @@ def find_file(name: str) -> str:
             return os.path.join(root, name)
     raise FileNotFoundError(f"{name} not found under extracted model dir")
 
+
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
 
+    # Load artifacts
     tar_path = find_model_tar()
     extract_tar(tar_path)
 
@@ -47,6 +53,7 @@ def main():
     model = joblib.load(model_path)
     le = joblib.load(le_path)
 
+    # Load test set
     df = pd.read_csv(TEST_PATH).dropna()
     if df.empty:
         raise ValueError("Test dataset is empty.")
@@ -59,6 +66,7 @@ def main():
     acc = float(accuracy_score(y_true, preds))
     f1 = float(f1_score(y_true, preds, average="macro"))
 
+    # ✅ EXACT schema expected by JsonGet path:
     payload = {
         "metric_groups": [
             {
@@ -74,8 +82,9 @@ def main():
     with open(OUT_FILE, "w") as f:
         json.dump(payload, f)
 
-    print("metric_groups:", payload["metric_groups"])
-    print("✅ Evaluation written:", OUT_FILE)
+    print("✅ evaluation.json written to:", OUT_FILE)
+    print(json.dumps(payload, indent=2))
+
 
 if __name__ == "__main__":
     main()
