@@ -1,4 +1,4 @@
-name: Build-Train-Evaluate-Register (Iris)
+name: Build-Train-Evaluate-Register (Iris-model)
 
 on:
   push:
