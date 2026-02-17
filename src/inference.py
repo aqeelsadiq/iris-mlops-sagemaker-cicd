@@ -17,13 +17,11 @@ def input_fn(request_body, request_content_type):
             request_body = request_body.decode("utf-8")
         payload = json.loads(request_body)
         data = payload["instances"] if isinstance(payload, dict) and "instances" in payload else payload
-        df = pd.DataFrame(data)
-        return df
+        return pd.DataFrame(data)
 
     if request_content_type == "text/csv":
         s = request_body.decode("utf-8") if isinstance(request_body, (bytes, bytearray)) else request_body
         df = pd.read_csv(io.StringIO(s))
-        # If CSV has no header and comes as 4 columns, assign expected names
         if list(df.columns) == [0, 1, 2, 3] and df.shape[1] == 4:
             df.columns = FEATURES
         return df
@@ -34,7 +32,6 @@ def predict_fn(input_data, artifacts):
     model = artifacts["model"]
     le = artifacts["le"]
 
-    # Ensure correct feature order
     X = input_data[FEATURES].copy()
     pred_idx = model.predict(X)
     pred_label = le.inverse_transform(pred_idx)
@@ -48,6 +45,5 @@ def output_fn(prediction, response_content_type):
             "species": prediction["species"].tolist()
         }), response_content_type
 
-    # text/plain
     lines = [f"{i}\t{s}" for i, s in zip(prediction["class_index"], prediction["species"])]
     return "\n".join(lines), "text/plain"

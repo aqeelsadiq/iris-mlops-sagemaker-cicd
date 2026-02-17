@@ -3,11 +3,11 @@ import json
 import tarfile
 import joblib
 import pandas as pd
-
 from sklearn.metrics import accuracy_score, f1_score
 
 MODEL_INPUT_DIR = "/opt/ml/processing/model"
 EXTRACT_DIR = "/opt/ml/processing/model_extracted"
+
 TEST_PATH = "/opt/ml/processing/test/test.csv"
 OUT_DIR = "/opt/ml/processing/evaluation"
 OUT_FILE = os.path.join(OUT_DIR, "evaluation.json")
@@ -47,8 +47,7 @@ def main():
     model = joblib.load(model_path)
     le = joblib.load(le_path)
 
-    df = pd.read_csv(TEST_PATH)
-    df = df.dropna()
+    df = pd.read_csv(TEST_PATH).dropna()
     if df.empty:
         raise ValueError("Test dataset is empty.")
 
@@ -60,7 +59,6 @@ def main():
     acc = float(accuracy_score(y_true, preds))
     f1 = float(f1_score(y_true, preds, average="macro"))
 
-    # ✅ SageMaker Model Registry evaluation schema expects metric_groups
     payload = {
         "metric_groups": [
             {
@@ -76,8 +74,8 @@ def main():
     with open(OUT_FILE, "w") as f:
         json.dump(payload, f)
 
+    print("metric_groups:", payload["metric_groups"])
     print("✅ Evaluation written:", OUT_FILE)
-    print(payload)
 
 if __name__ == "__main__":
     main()

@@ -1,4 +1,4 @@
-name: Build-Train-Evaluate-Register (Iris-model)
+name: Build-Train-Evaluate-Register (Iris)
 
 on:
   push:
@@ -16,7 +16,7 @@ jobs:
       S3_BUCKET: sagemaker-aqeel-iris-us-east-1-387867038403
       SAGEMAKER_EXEC_ROLE_ARN: arn:aws:iam::387867038403:role/AqeelIrisSageMakerExecutionRole
 
-      S3_DATA_KEY: datasets/iris/iris.data
+      S3_DATA_KEY: datasets/iris/iris-data.csv
 
     steps:
       - name: Checkout
@@ -29,11 +29,11 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Download Iris dataset (UCI) and upload to S3
+      - name: Download Iris dataset and upload to S3 as iris-data.csv
         run: |
           mkdir -p data
-          curl -L "https://archive.ics.uci.edu/ml/machine-learning-databases/iris/iris.data" -o "data/iris.data"
-          aws s3 cp "data/iris.data" "s3://${{ env.S3_BUCKET }}/${{ env.S3_DATA_KEY }}"
+          curl -L "https://archive.ics.uci.edu/ml/machine-learning-databases/iris/iris.data" -o "data/iris-data.csv"
+          aws s3 cp "data/iris-data.csv" "s3://${{ env.S3_BUCKET }}/${{ env.S3_DATA_KEY }}"
 
       - name: Setup Python
         uses: actions/setup-python@v5
@@ -43,13 +43,9 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-
-          # Ensure SageMaker v2 line to avoid modular v3 conflicts
           pip uninstall -y sagemaker sagemaker-core sagemaker-mlops sagemaker-serve sagemaker-train sagemaker-mlflow || true
-
           pip install -r src/requirements.txt
           pip install "sagemaker>=2.218.0,<3"
-
           python -c "import importlib.metadata as m; print('sagemaker:', m.version('sagemaker'))"
 
       - name: Create/Update SageMaker Pipeline

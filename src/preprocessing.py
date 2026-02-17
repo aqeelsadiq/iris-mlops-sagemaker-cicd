@@ -2,8 +2,7 @@ import os
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
-# Iris UCI has no header, 5 cols: 4 features + species
-INPUT_FILE = "/opt/ml/processing/input/iris.data"
+INPUT_FILE = "/opt/ml/processing/input/iris-data.csv"
 TRAIN_OUT = "/opt/ml/processing/train/train.csv"
 TEST_OUT = "/opt/ml/processing/test/test.csv"
 
@@ -12,7 +11,7 @@ COLS = ["sepal_length", "sepal_width", "petal_length", "petal_width", "species"]
 def main():
     df = pd.read_csv(INPUT_FILE, header=None, names=COLS)
 
-    # Some versions include trailing blank line → drop empty rows
+    # Drop empty rows (sometimes UCI has trailing newline)
     df = df.dropna()
     if df.empty:
         raise ValueError("Input dataset is empty after cleaning.")

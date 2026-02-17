@@ -1,5 +1,6 @@
 import argparse
 import boto3
+
 from sagemaker.image_uris import retrieve
 from sagemaker.processing import ScriptProcessor, ProcessingInput, ProcessingOutput
 from sagemaker.sklearn.estimator import SKLearn
@@ -13,6 +14,7 @@ from sagemaker.workflow.functions import JsonGet
 from sagemaker.workflow.conditions import ConditionGreaterThanOrEqualTo
 from sagemaker.workflow.condition_step import ConditionStep
 from sagemaker.workflow.step_collections import RegisterModel
+
 
 def parse_args():
     p = argparse.ArgumentParser()
@@ -29,6 +31,7 @@ def parse_args():
     p.add_argument("--training-instance-type", default="ml.m5.large")
     p.add_argument("--evaluation-instance-type", default="ml.t3.medium")
     return p.parse_args()
+
 
 def main():
     args = parse_args()
@@ -119,12 +122,14 @@ def main():
                 destination="/opt/ml/processing/test",
             ),
         ],
-        outputs=[ProcessingOutput(output_name="evaluation", source="/opt/ml/processing/evaluation")],
+        outputs=[
+            ProcessingOutput(output_name="evaluation", source="/opt/ml/processing/evaluation")
+        ],
         code="src/evaluation.py",
         property_files=[evaluation_report],
     )
 
-    # 4) Condition on Accuracy (metric_groups[0].metric_data[0] is accuracy by our evaluation.py)
+    # ✅ FIX: read accuracy from metric_groups schema
     acc_value = JsonGet(
         step_name=step_eval.name,
         property_file=evaluation_report,
@@ -133,7 +138,7 @@ def main():
 
     condition = ConditionGreaterThanOrEqualTo(left=acc_value, right=acc_threshold_param)
 
-    # 5) Register Model (PendingManualApproval) + include inference code
+    # 4) Register Model (PendingManualApproval) + include inference code
     register_step = RegisterModel(
         name="IrisRegisterModel",
         estimator=estimator,
@@ -165,6 +170,7 @@ def main():
 
     pipeline.upsert(role_arn=args.role_arn)
     print(f"✅ Pipeline upserted successfully: {args.pipeline_name}")
+
 
 if __name__ == "__main__":
     main()

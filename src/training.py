@@ -22,6 +22,7 @@ def main():
     args = parse_args()
 
     df = pd.read_csv(args.train)
+    df = df.dropna()
     if df.empty:
         raise ValueError(f"Training data is empty: {args.train}")
 

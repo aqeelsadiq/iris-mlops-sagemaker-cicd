@@ -3,6 +3,7 @@ import boto3
 import sagemaker
 from sagemaker.sklearn.model import SKLearnModel
 
+
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--region", required=True)
@@ -12,8 +13,10 @@ def parse_args():
     p.add_argument("--instance-type", default="ml.m5.large")
     return p.parse_args()
 
+
 def main():
     args = parse_args()
+
     sm = boto3.client("sagemaker", region_name=args.region)
 
     resp = sm.list_model_packages(
@@ -52,6 +55,7 @@ def main():
     )
 
     print("✅ Deployed endpoint:", args.endpoint_name)
+
 
 if __name__ == "__main__":
     main()
