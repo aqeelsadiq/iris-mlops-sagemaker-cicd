@@ -1,0 +1,75 @@
+name: Build-Train-Evaluate-Register (Iris)
+
+on:
+  push:
+    branches: ["main"]
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+
+    env:
+      PIPELINE_NAME: iris-pipeline
+      MODEL_GROUP: iris-model-group
+
+      AWS_REGION: us-east-1
+      S3_BUCKET: sagemaker-aqeel-iris-us-east-1-387867038403
+      SAGEMAKER_EXEC_ROLE_ARN: arn:aws:iam::387867038403:role/AqeelIrisSageMakerExecutionRole
+
+      S3_DATA_KEY: datasets/iris/iris.data
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Download Iris dataset (UCI) and upload to S3
+        run: |
+          mkdir -p data
+          curl -L "https://archive.ics.uci.edu/ml/machine-learning-databases/iris/iris.data" -o "data/iris.data"
+          aws s3 cp "data/iris.data" "s3://${{ env.S3_BUCKET }}/${{ env.S3_DATA_KEY }}"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+
+          # Ensure SageMaker v2 line to avoid modular v3 conflicts
+          pip uninstall -y sagemaker sagemaker-core sagemaker-mlops sagemaker-serve sagemaker-train sagemaker-mlflow || true
+
+          pip install -r src/requirements.txt
+          pip install "sagemaker>=2.218.0,<3"
+
+          python -c "import importlib.metadata as m; print('sagemaker:', m.version('sagemaker'))"
+
+      - name: Create/Update SageMaker Pipeline
+        run: |
+          python pipelines/pipeline_definition.py \
+            --region "${{ env.AWS_REGION }}" \
+            --role-arn "${{ env.SAGEMAKER_EXEC_ROLE_ARN }}" \
+            --pipeline-name "${{ env.PIPELINE_NAME }}" \
+            --model-package-group-name "${{ env.MODEL_GROUP }}" \
+            --default-bucket "${{ env.S3_BUCKET }}" \
+            --train-data-s3-uri "s3://${{ env.S3_BUCKET }}/${{ env.S3_DATA_KEY }}" \
+            --accuracy-threshold "0.90" \
+            --processing-instance-type "ml.t3.medium" \
+            --training-instance-type "ml.m5.large" \
+            --evaluation-instance-type "ml.t3.medium"
+
+      - name: Start Pipeline Execution
+        run: |
+          aws sagemaker start-pipeline-execution \
+            --pipeline-name "${{ env.PIPELINE_NAME }}" \
+            --pipeline-parameters \
+              Name=TrainDataS3Uri,Value="s3://${{ env.S3_BUCKET }}/${{ env.S3_DATA_KEY }}" \
+              Name=AccuracyThreshold,Value="0.90"
