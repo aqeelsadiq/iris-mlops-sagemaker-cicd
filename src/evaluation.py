@@ -20,7 +20,6 @@ def find_model_tar() -> str:
     candidate = os.path.join(MODEL_INPUT_DIR, "model.tar.gz")
     if os.path.exists(candidate):
         return candidate
-
     tars = [os.path.join(MODEL_INPUT_DIR, f) for f in os.listdir(MODEL_INPUT_DIR) if f.endswith(".tar.gz")]
     if not tars:
         raise FileNotFoundError(f"No model tar.gz found in {MODEL_INPUT_DIR}. Contents: {os.listdir(MODEL_INPUT_DIR)}")
@@ -43,17 +42,12 @@ def find_file(name: str) -> str:
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
 
-    # Load artifacts
     tar_path = find_model_tar()
     extract_tar(tar_path)
 
-    model_path = find_file("model.joblib")
-    le_path = find_file("label_encoder.joblib")
+    model = joblib.load(find_file("model.joblib"))
+    le = joblib.load(find_file("label_encoder.joblib"))
 
-    model = joblib.load(model_path)
-    le = joblib.load(le_path)
-
-    # Load test set
     df = pd.read_csv(TEST_PATH).dropna()
     if df.empty:
         raise ValueError("Test dataset is empty.")
@@ -66,24 +60,17 @@ def main():
     acc = float(accuracy_score(y_true, preds))
     f1 = float(f1_score(y_true, preds, average="macro"))
 
-    # ✅ EXACT schema expected by JsonGet path:
+    # ✅ SIMPLE JSON (no nested schema issues)
     payload = {
-        "metric_groups": [
-            {
-                "name": "classification",
-                "metric_data": [
-                    {"name": "accuracy", "value": acc},
-                    {"name": "f1_macro", "value": f1},
-                ],
-            }
-        ]
+        "accuracy": acc,
+        "f1_macro": f1
     }
 
     with open(OUT_FILE, "w") as f:
         json.dump(payload, f)
 
-    print("✅ evaluation.json written to:", OUT_FILE)
-    print(json.dumps(payload, indent=2))
+    print("✅ evaluation.json written:", OUT_FILE)
+    print(payload)
 
 
 if __name__ == "__main__":
