@@ -179,6 +179,8 @@
 
 # pipelines/pipeline_definition.py
 
+# pipelines/pipeline_definition.py
+
 import argparse
 import boto3
 
@@ -191,12 +193,11 @@ from sagemaker.workflow.pipeline_context import PipelineSession
 from sagemaker.workflow.parameters import ParameterString, ParameterFloat
 from sagemaker.workflow.steps import ProcessingStep, TrainingStep
 from sagemaker.workflow.properties import PropertyFile
-from sagemaker.workflow.functions import JsonGet
+from sagemaker.workflow.functions import JsonGet, Join
 from sagemaker.workflow.conditions import ConditionGreaterThanOrEqualTo
 from sagemaker.workflow.condition_step import ConditionStep
 from sagemaker.workflow.step_collections import RegisterModel
 
-# ✅ NEW: attach evaluation to Model Registry
 from sagemaker.model_metrics import ModelMetrics, MetricsSource
 
 
@@ -232,7 +233,6 @@ def main():
     train_data_param = ParameterString("TrainDataS3Uri", default_value=args.train_data_s3_uri)
     acc_threshold_param = ParameterFloat("AccuracyThreshold", default_value=float(args.accuracy_threshold))
 
-    # Container image for sklearn processing/training in this region
     sklearn_image = retrieve(
         framework="sklearn",
         region=args.region,
@@ -302,11 +302,10 @@ def main():
         sagemaker_session=pipeline_sess,
     )
 
-    # This tells the pipeline "there will be a JSON file called evaluation.json in output_name=evaluation"
     evaluation_report = PropertyFile(
         name="EvaluationReport",
         output_name="evaluation",
-        path="evaluation.json",
+        path="evaluation.json",  # evaluation.py must write this file into the output folder root
     )
 
     step_eval = ProcessingStep(
@@ -329,7 +328,7 @@ def main():
         property_files=[evaluation_report],
     )
 
-    # Read "accuracy" from evaluation.json so we can gate registration
+    # Gate registration on accuracy
     acc_value = JsonGet(
         step_name=step_eval.name,
         property_file=evaluation_report,
@@ -338,13 +337,11 @@ def main():
 
     condition = ConditionGreaterThanOrEqualTo(left=acc_value, right=acc_threshold_param)
 
-    # ✅ NEW: attach evaluation.json to the Model Package (Model Registry "Evaluate" section)
-    # S3Output.S3Uri points to the evaluation output folder; append /evaluation.json
-    evaluation_json_s3_uri = (
-        step_eval.properties.ProcessingOutputConfig.Outputs["evaluation"].S3Output.S3Uri
-        + "/evaluation.json"
-    )
+    # ✅ FIX: pipeline-safe construction of "s3://.../evaluation.json"
+    evaluation_output_s3_uri = step_eval.properties.ProcessingOutputConfig.Outputs["evaluation"].S3Output.S3Uri
+    evaluation_json_s3_uri = Join(on="/", values=[evaluation_output_s3_uri, "evaluation.json"])
 
+    # ✅ Attach metrics to Model Registry so "Evaluate" isn't Undefined
     model_metrics = ModelMetrics(
         model_statistics=MetricsSource(
             s3_uri=evaluation_json_s3_uri,
@@ -368,9 +365,7 @@ def main():
         description="Iris classifier - registered after passing evaluation threshold.",
         entry_point="inference.py",
         source_dir="src",
-
-        # ✅ This makes SageMaker Model Registry show evaluation content instead of "Undefined"
-        model_metrics=model_metrics,
+        model_metrics=model_metrics,  # ✅ this drives Model Registry "Evaluate"
     )
 
     step_condition = ConditionStep(
@@ -393,3 +388,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
