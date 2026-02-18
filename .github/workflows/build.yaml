@@ -15,7 +15,6 @@ jobs:
       AWS_REGION: us-east-1
       S3_BUCKET: sagemaker-aqeel-iris-us-east-1-387867038403
       SAGEMAKER_EXEC_ROLE_ARN: arn:aws:iam::387867038403:role/AqeelIrisSageMakerExecutionRole
-
       S3_DATA_KEY: datasets/iris/iris-data.csv
 
     steps:
