@@ -20,7 +20,7 @@ def parse_args():
     p.add_argument("--instance-count", type=int, default=1)
     p.add_argument("--volume-size", type=int, default=20)
     p.add_argument("--max-runtime", type=int, default=3600)
-    p.add_argument("--job-name", default="baseline-suggestion-job")
+    p.add_argument("--job-name", default="baseline-suggestion-job-1")
     return p.parse_args()
 
 
