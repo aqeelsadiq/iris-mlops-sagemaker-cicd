@@ -59,10 +59,12 @@ jobs:
           python monitoring/create_baseline.py \
             --region $AWS_REGION \
             --role-arn $SAGEMAKER_EXEC_ROLE_ARN \
-            --baseline-data-s3-uri $BASELINE_DATASET_S3_URI \
+            --baseline-data-s3-uri s3://sagemaker-aqeel-iris-us-east-1-387867038403/datasets/iris/features.csv \
             --baseline-output-s3-uri $BASELINE_OUTPUT_S3_URI \
-            --instance-type ml.t3.medium \
-            --job-name baseline-suggestion-1
+            --instance-type ml.m5.xlarge \
+            --instance-count 1 \
+            --max-runtime 3600
+
 
       - name: Create Monitoring Schedule
         run: |
