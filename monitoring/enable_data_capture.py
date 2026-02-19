@@ -1,104 +1,94 @@
 # monitoring/enable_data_capture.py
 import argparse
-import time
-import datetime as dt
-import uuid
+import hashlib
 import boto3
+
+
+def _safe_name(base: str, suffix: str, max_len: int = 63) -> str:
+    """
+    SageMaker endpoint config name must match:
+      [a-zA-Z0-9](-*[a-zA-Z0-9]){0,62}
+    and length <= 63.
+    """
+    base = (base or "endpoint").replace("_", "-")
+    base = "".join(ch for ch in base if ch.isalnum() or ch == "-").strip("-")
+    if not base:
+        base = "endpoint"
+
+    # small deterministic hash so repeated runs don't explode names
+    h = hashlib.sha1(suffix.encode("utf-8")).hexdigest()[:8]
+    name = f"{base}-{h}"
+    return name[:max_len]
 
 
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--region", required=True)
     p.add_argument("--endpoint-name", required=True)
-    p.add_argument("--capture-s3-uri", required=True)  # e.g. s3://.../datacapture/
+    p.add_argument("--capture-s3-uri", required=True)  # e.g. s3://bucket/monitoring/datacapture/
     p.add_argument("--sampling-percentage", type=int, default=100)
+    p.add_argument("--enable", action="store_true", default=True)
     return p.parse_args()
-
-
-def short_config_name(endpoint_name: str) -> str:
-    # Max 63 chars. Keep it short + unique.
-    ts = dt.datetime.utcnow().strftime("%y%m%d%H%M")
-    rand = uuid.uuid4().hex[:6]
-    base = f"{endpoint_name}-dc-{ts}-{rand}"
-    return base[:63]
-
-
-def wait_for_endpoint(sm, endpoint_name: str, timeout_sec: int = 1800):
-    start = time.time()
-    last = None
-    while True:
-        desc = sm.describe_endpoint(EndpointName=endpoint_name)
-        status = desc["EndpointStatus"]
-        if status != last:
-            print("Endpoint status:", status)
-            last = status
-
-        if status == "InService":
-            return desc
-        if status in ("Failed", "OutOfService"):
-            raise RuntimeError(f"Endpoint entered bad state: {status} :: {desc.get('FailureReason')}")
-
-        if time.time() - start > timeout_sec:
-            raise TimeoutError("Timed out waiting for endpoint to become InService")
-
-        time.sleep(15)
 
 
 def main():
     args = parse_args()
     sm = boto3.client("sagemaker", region_name=args.region)
 
-    # 1) Ensure endpoint is InService
-    endpoint_desc = wait_for_endpoint(sm, args.endpoint_name)
-    current_cfg = endpoint_desc["EndpointConfigName"]
-    cfg_desc = sm.describe_endpoint_config(EndpointConfigName=current_cfg)
+    ep = sm.describe_endpoint(EndpointName=args.endpoint_name)
+    current_cfg_name = ep["EndpointConfigName"]
+    cfg = sm.describe_endpoint_config(EndpointConfigName=current_cfg_name)
 
-    # 2) If data capture already enabled, exit cleanly
-    if "DataCaptureConfig" in cfg_desc and cfg_desc["DataCaptureConfig"].get("EnableCapture", False):
-        print("✅ Data capture already enabled on endpoint config:", current_cfg)
-        return
+    if not cfg.get("ProductionVariants"):
+        raise RuntimeError("EndpointConfig has no ProductionVariants")
 
-    # 3) Create a NEW endpoint config that copies production variants + adds DataCaptureConfig
-    new_cfg_name = short_config_name(args.endpoint_name)
+    # Use first variant (common for single-variant endpoints)
+    pv0 = cfg["ProductionVariants"][0]
+    variant_name = pv0["VariantName"]
 
-    production_variants = cfg_desc["ProductionVariants"]
+    # Create a new endpoint config with the SAME variants but with DataCaptureConfig enabled
+    new_cfg_name = _safe_name(
+        base=f"{args.endpoint_name}-datacapture",
+        suffix=f"{current_cfg_name}:{args.capture_s3_uri}:{args.sampling_percentage}",
+        max_len=63,
+    )
 
-    # Copy optional fields safely if present
-    request = {
-        "EndpointConfigName": new_cfg_name,
-        "ProductionVariants": production_variants,
-        "DataCaptureConfig": {
-            "EnableCapture": True,
-            "InitialSamplingPercentage": args.sampling_percentage,
-            "DestinationS3Uri": args.capture_s3_uri,
-            "CaptureOptions": [{"CaptureMode": "Input"}, {"CaptureMode": "Output"}],
-            "CaptureContentTypeHeader": {
-                "CsvContentTypes": ["text/csv"],
-                "JsonContentTypes": ["application/json"],
-            },
+    data_capture_cfg = {
+        "EnableCapture": True,
+        "InitialSamplingPercentage": args.sampling_percentage,
+        "DestinationS3Uri": args.capture_s3_uri,
+        "CaptureOptions": [{"CaptureMode": "Input"}, {"CaptureMode": "Output"}],
+        "CaptureContentTypeHeader": {
+            # keep broad; you can tighten later
+            "CsvContentTypes": ["text/csv"],
+            "JsonContentTypes": ["application/json"],
         },
     }
 
-    # Some endpoint configs have extra fields; preserve them if present
-    if "KmsKeyId" in cfg_desc:
-        request["KmsKeyId"] = cfg_desc["KmsKeyId"]
-    if "AsyncInferenceConfig" in cfg_desc:
-        request["AsyncInferenceConfig"] = cfg_desc["AsyncInferenceConfig"]
-    if "ShadowProductionVariants" in cfg_desc:
-        request["ShadowProductionVariants"] = cfg_desc["ShadowProductionVariants"]
-    if "ExplainerConfig" in cfg_desc:
-        request["ExplainerConfig"] = cfg_desc["ExplainerConfig"]
+    create_payload = {
+        "EndpointConfigName": new_cfg_name,
+        "ProductionVariants": cfg["ProductionVariants"],
+        # Keep optional fields if present
+    }
+    if "KmsKeyId" in cfg and cfg["KmsKeyId"]:
+        create_payload["KmsKeyId"] = cfg["KmsKeyId"]
+    create_payload["DataCaptureConfig"] = data_capture_cfg
 
-    sm.create_endpoint_config(**request)
-    print("✅ Created endpoint config:", new_cfg_name)
+    # Some accounts use ShadowProductionVariants
+    if "ShadowProductionVariants" in cfg and cfg["ShadowProductionVariants"]:
+        create_payload["ShadowProductionVariants"] = cfg["ShadowProductionVariants"]
 
-    # 4) Update endpoint to use the new config
+    print(f"Creating endpoint config with DataCapture enabled: {new_cfg_name}")
+    sm.create_endpoint_config(**create_payload)
+
+    print(f"Updating endpoint to use config: {new_cfg_name}")
     sm.update_endpoint(EndpointName=args.endpoint_name, EndpointConfigName=new_cfg_name)
-    print("✅ Updating endpoint to new config (this can take a few minutes)...")
 
-    # 5) Wait until endpoint returns to InService
-    wait_for_endpoint(sm, args.endpoint_name)
-    print("✅ Endpoint updated and InService. Data capture enabled.")
+    print("✅ Data Capture enabled")
+    print("   Endpoint:", args.endpoint_name)
+    print("   Destination:", args.capture_s3_uri)
+    print("   Sampling %:", args.sampling_percentage)
+    print("   Variant:", variant_name)
 
 
 if __name__ == "__main__":
