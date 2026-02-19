@@ -1,0 +1,81 @@
+name: Setup Model Monitoring (Iris)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+
+    env:
+      AWS_REGION: us-east-1
+      ENDPOINT_NAME: iris-endpoint
+      DEFAULT_BUCKET: sagemaker-aqeel-iris-us-east-1-387867038403
+
+      # Your raw dataset (baseline)
+      BASELINE_DATASET_S3_URI: s3://sagemaker-aqeel-iris-us-east-1-387867038403/datasets/iris/iris-data.csv
+
+      # Monitoring buckets/prefix
+      DATACAPTURE_S3_URI: s3://sagemaker-aqeel-iris-us-east-1-387867038403/monitoring/datacapture/
+      BASELINE_OUTPUT_S3_URI: s3://sagemaker-aqeel-iris-us-east-1-387867038403/monitoring/baseline/
+      REPORTS_S3_URI: s3://sagemaker-aqeel-iris-us-east-1-387867038403/monitoring/reports/
+
+      SCHEDULE_NAME: aqeel-iris-data-monitor
+      ALERT_EMAIL: your-email@example.com
+
+      # Must be an execution role with SageMaker + S3 permissions
+      SAGEMAKER_EXEC_ROLE_ARN: arn:aws:iam::387867038403:role/AqeelIrisSageMakerExecutionRole
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          pip install -r monitoring/requirements.txt
+
+      - name: Enable Data Capture
+        run: |
+          python monitoring/enable_data_capture.py \
+            --region $AWS_REGION \
+            --endpoint-name $ENDPOINT_NAME \
+            --capture-s3-uri $DATACAPTURE_S3_URI
+
+      - name: Create Baseline
+        run: |
+          python monitoring/create_baseline.py \
+            --region $AWS_REGION \
+            --role-arn $SAGEMAKER_EXEC_ROLE_ARN \
+            --default-bucket $DEFAULT_BUCKET \
+            --baseline-dataset-s3-uri $BASELINE_DATASET_S3_URI \
+            --baseline-output-s3-uri $BASELINE_OUTPUT_S3_URI
+
+      - name: Create Monitoring Schedule
+        run: |
+          python monitoring/create_monitor_schedule.py \
+            --region $AWS_REGION \
+            --role-arn $SAGEMAKER_EXEC_ROLE_ARN \
+            --default-bucket $DEFAULT_BUCKET \
+            --endpoint-name $ENDPOINT_NAME \
+            --schedule-name $SCHEDULE_NAME \
+            --baseline-s3-uri $BASELINE_OUTPUT_S3_URI \
+            --monitor-output-s3-uri $REPORTS_S3_URI \
+            --cron "cron(0 * ? * * *)"
+
+      - name: Create SNS + Alarm
+        run: |
+          python monitoring/create_alarm_sns.py \
+            --region $AWS_REGION \
+            --schedule-name $SCHEDULE_NAME \
+            --email $ALERT_EMAIL
