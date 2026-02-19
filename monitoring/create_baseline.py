@@ -2,7 +2,7 @@ import argparse
 import boto3
 import sagemaker
 from sagemaker.model_monitor import DefaultModelMonitor
-from sagemaker.session import Session
+# from sagemaker.session import Session
 
 def parse_args():
     p = argparse.ArgumentParser()
