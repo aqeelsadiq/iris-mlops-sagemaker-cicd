@@ -180,7 +180,6 @@
 # pipelines/pipeline_definition.py
 
 # pipelines/pipeline_definition.py
-
 import argparse
 import boto3
 
