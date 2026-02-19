@@ -62,7 +62,7 @@ jobs:
             --baseline-data-s3-uri $BASELINE_DATASET_S3_URI \
             --baseline-output-s3-uri $BASELINE_OUTPUT_S3_URI \
             --instance-type ml.t3.medium \
-            --job-name baseline-suggestion-job
+            --job-name baseline-suggestion-1
 
       - name: Create Monitoring Schedule
         run: |
