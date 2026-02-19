@@ -24,7 +24,7 @@ def main():
     monitor = DefaultModelMonitor(
         role=args.role_arn,
         instance_count=1,
-        instance_type="ml.m5.large",
+        instance_type="ml.t3.medium",
         volume_size_in_gb=20,
         max_runtime_in_seconds=3600,
         sagemaker_session=sm_sess,
