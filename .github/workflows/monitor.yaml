@@ -21,7 +21,7 @@ jobs:
       REPORTS_S3_URI: s3://sagemaker-aqeel-iris-us-east-1-387867038403/monitoring/reports/
 
       SCHEDULE_NAME: aqeel-iris-data-monitor
-      ALERT_EMAIL: your-email@example.com
+      ALERT_EMAIL: aqeel.sadiq3456@gmail.com
 
       # Must be an execution role with SageMaker + S3 permissions
       SAGEMAKER_EXEC_ROLE_ARN: arn:aws:iam::387867038403:role/AqeelIrisSageMakerExecutionRole
@@ -41,9 +41,11 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install deps
+      - name: Install monitoring deps
         run: |
-          pip install -r monitoring/requirements.txt
+            pip install --upgrade pip
+            pip install --no-cache-dir -r monitoring/requirements.txt
+        
 
       - name: Enable Data Capture
         run: |
