@@ -43,8 +43,11 @@ jobs:
 
       - name: Install monitoring deps
         run: |
-            pip install --upgrade pip
-            pip install --no-cache-dir -r monitoring/requirements.txt
+            python -m pip install --upgrade pip setuptools wheel
+            python -m pip install --no-cache-dir -r monitoring/requirements.txt
+            python -c "import sagemaker; print('sagemaker version:', sagemaker.__version__)"
+            python -c "from sagemaker import model_monitor; print('model_monitor OK')"
+        
         
 
       - name: Enable Data Capture
