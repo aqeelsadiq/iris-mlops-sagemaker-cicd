@@ -1,27 +1,132 @@
-name: Setup Model Monitoring (Iris)
+# name: Setup Model Monitoring (Iris)
+
+# on:
+#   workflow_dispatch:
+
+# jobs:
+#   monitor:
+#     runs-on: ubuntu-latest
+
+#     env:
+#       AWS_REGION: us-east-1
+#       ENDPOINT_NAME: iris-endpoint
+#       DEFAULT_BUCKET: sagemaker-aqeel-iris-us-east-1-387867038403
+
+#       # ✅ Use FEATURES baseline (4 columns + header, no label)
+#       BASELINE_DATASET_S3_URI: s3://sagemaker-aqeel-iris-us-east-1-387867038403/datasets/iris/features.csv
+
+#       DATACAPTURE_S3_URI: s3://sagemaker-aqeel-iris-us-east-1-387867038403/monitoring/datacapture/
+#       BASELINE_OUTPUT_S3_URI: s3://sagemaker-aqeel-iris-us-east-1-387867038403/monitoring/baseline/
+#       REPORTS_S3_URI: s3://sagemaker-aqeel-iris-us-east-1-387867038403/monitoring/reports/
+
+#       SCHEDULE_NAME: aqeel-iris-data-monitor
+#       ALERT_EMAIL: aqeel.sadiq3456@gmail.com
+#       SAGEMAKER_EXEC_ROLE_ARN: arn:aws:iam::387867038403:role/AqeelIrisSageMakerExecutionRole
+
+#     steps:
+#       - uses: actions/checkout@v4
+
+#       - name: Configure AWS Credentials
+#         uses: aws-actions/configure-aws-credentials@v4
+#         with:
+#           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+#           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+#           aws-region: ${{ env.AWS_REGION }}
+
+#       - name: Setup Python
+#         uses: actions/setup-python@v5
+#         with:
+#           python-version: "3.11"
+
+#       - name: Install deps
+#         run: |
+#           python -m pip install --upgrade pip setuptools wheel
+#           python -m pip uninstall -y sagemaker || true
+#           python -m pip install --no-cache-dir "sagemaker==2.231.0" "boto3>=1.34.0"
+#           python -c "import sagemaker; print('sagemaker version:', sagemaker.__version__)"
+#           python -c "from sagemaker.model_monitor import DefaultModelMonitor; print('ModelMonitor OK')"
+
+#       - name: Enable Data Capture
+#         run: |
+#           python monitoring/enable_data_capture.py \
+#             --region $AWS_REGION \
+#             --endpoint-name $ENDPOINT_NAME \
+#             --capture-s3-uri $DATACAPTURE_S3_URI \
+#             --sampling-percentage 100
+
+#       - name: Create Baseline
+#         run: |
+#           python monitoring/create_baseline.py \
+#             --region $AWS_REGION \
+#             --role-arn $SAGEMAKER_EXEC_ROLE_ARN \
+#             --baseline-data-s3-uri s3://sagemaker-aqeel-iris-us-east-1-387867038403/datasets/iris/features.csv \
+#             --baseline-output-s3-uri $BASELINE_OUTPUT_S3_URI \
+#             --instance-type ml.m5.large
+
+
+
+#       - name: Create Monitoring Schedule
+#         run: |
+#           python monitoring/create_monitor_schedule.py \
+#             --region $AWS_REGION \
+#             --role-arn $SAGEMAKER_EXEC_ROLE_ARN \
+#             --endpoint-name $ENDPOINT_NAME \
+#             --schedule-name $SCHEDULE_NAME \
+#             --baseline-s3-uri $BASELINE_OUTPUT_S3_URI \
+#             --monitor-output-s3-uri $REPORTS_S3_URI \
+#             --cron "cron(0 * ? * * *)" \
+#             --instance-type ml.t3.medium
+
+#       - name: Create SNS + Failure Notifications
+#         run: |
+#           python monitoring/create_alarm_sns.py \
+#             --region $AWS_REGION \
+#             --schedule-name $SCHEDULE_NAME \
+#             --email $ALERT_EMAIL
+
+
+
+name: Deploy Real-time Monitoring (Iris)
 
 on:
   workflow_dispatch:
+#   schedule:
+#     # daily baseline refresh (optional)
+#     - cron: "0 2 * * *"
 
 jobs:
-  monitor:
+  monitoring:
     runs-on: ubuntu-latest
 
     env:
       AWS_REGION: us-east-1
       ENDPOINT_NAME: iris-endpoint
-      DEFAULT_BUCKET: sagemaker-aqeel-iris-us-east-1-387867038403
+      S3_BUCKET: sagemaker-aqeel-iris-us-east-1-387867038403
 
-      # ✅ Use FEATURES baseline (4 columns + header, no label)
-      BASELINE_DATASET_S3_URI: s3://sagemaker-aqeel-iris-us-east-1-387867038403/datasets/iris/features.csv
+      # training/baseline dataset (your existing dataset)
+      TRAIN_DATA_S3_URI: s3://sagemaker-aqeel-iris-us-east-1-387867038403/datasets/iris/iris-data.csv
 
+      # where data capture lands
+      DATACAPTURE_S3_PREFIX: monitoring/datacapture/
       DATACAPTURE_S3_URI: s3://sagemaker-aqeel-iris-us-east-1-387867038403/monitoring/datacapture/
-      BASELINE_OUTPUT_S3_URI: s3://sagemaker-aqeel-iris-us-east-1-387867038403/monitoring/baseline/
-      REPORTS_S3_URI: s3://sagemaker-aqeel-iris-us-east-1-387867038403/monitoring/reports/
 
-      SCHEDULE_NAME: aqeel-iris-data-monitor
+      # where baseline is stored
+      BASELINE_S3_URI: s3://sagemaker-aqeel-iris-us-east-1-387867038403/monitoring/baseline/baseline.json
+
+      # notifications
       ALERT_EMAIL: aqeel.sadiq3456@gmail.com
-      SAGEMAKER_EXEC_ROLE_ARN: arn:aws:iam::387867038403:role/AqeelIrisSageMakerExecutionRole
+
+      # lambda settings
+      LAMBDA_NAME: aqeel-iris-drift-monitor
+      METRIC_NAMESPACE: Iris/Drift
+
+      # execution role for lambda (create it once in IAM)
+      # Must allow: s3:GetObject, s3:ListBucket, cloudwatch:PutMetricData, logs:* and sns:Publish (if using sns in lambda)
+      LAMBDA_ROLE_ARN: arn:aws:iam::387867038403:role/AqeelIrisSageMakerExecutionRole
+
+      # alarm
+      ALARM_NAME: aqeel-iris-drift-alarm
+      DRIFT_THRESHOLD: "0.2"   # tune this
 
     steps:
       - uses: actions/checkout@v4
@@ -40,46 +145,34 @@ jobs:
 
       - name: Install deps
         run: |
-          python -m pip install --upgrade pip setuptools wheel
-          python -m pip uninstall -y sagemaker || true
-          python -m pip install --no-cache-dir "sagemaker==2.231.0" "boto3>=1.34.0"
-          python -c "import sagemaker; print('sagemaker version:', sagemaker.__version__)"
-          python -c "from sagemaker.model_monitor import DefaultModelMonitor; print('ModelMonitor OK')"
+          python -m pip install --upgrade pip
+          pip install -r monitoring/requirements.txt
 
-      - name: Enable Data Capture
+      - name: Enable Data Capture on Endpoint (idempotent)
         run: |
           python monitoring/enable_data_capture.py \
-            --region $AWS_REGION \
-            --endpoint-name $ENDPOINT_NAME \
-            --capture-s3-uri $DATACAPTURE_S3_URI \
+            --region "${{ env.AWS_REGION }}" \
+            --endpoint-name "${{ env.ENDPOINT_NAME }}" \
+            --capture-s3-uri "${{ env.DATACAPTURE_S3_URI }}" \
             --sampling-percentage 100
 
-      - name: Create Baseline
+      - name: Build/Update Baseline (Pandas) -> S3
         run: |
-          python monitoring/create_baseline.py \
-            --region $AWS_REGION \
-            --role-arn $SAGEMAKER_EXEC_ROLE_ARN \
-            --baseline-data-s3-uri s3://sagemaker-aqeel-iris-us-east-1-387867038403/datasets/iris/features.csv \
-            --baseline-output-s3-uri $BASELINE_OUTPUT_S3_URI \
-            --instance-type ml.m5.large
+          python monitoring/baseline_build.py \
+            --region "${{ env.AWS_REGION }}" \
+            --train-data-s3-uri "${{ env.TRAIN_DATA_S3_URI }}" \
+            --baseline-s3-uri "${{ env.BASELINE_S3_URI }}"
 
-
-
-      - name: Create Monitoring Schedule
+      - name: Deploy Lambda + S3 Trigger + Alarm + SNS
         run: |
-          python monitoring/create_monitor_schedule.py \
-            --region $AWS_REGION \
-            --role-arn $SAGEMAKER_EXEC_ROLE_ARN \
-            --endpoint-name $ENDPOINT_NAME \
-            --schedule-name $SCHEDULE_NAME \
-            --baseline-s3-uri $BASELINE_OUTPUT_S3_URI \
-            --monitor-output-s3-uri $REPORTS_S3_URI \
-            --cron "cron(0 * ? * * *)" \
-            --instance-type ml.t3.medium
-
-      - name: Create SNS + Failure Notifications
-        run: |
-          python monitoring/create_alarm_sns.py \
-            --region $AWS_REGION \
-            --schedule-name $SCHEDULE_NAME \
-            --email $ALERT_EMAIL
+          python monitoring/deploy_monitoring.py \
+            --region "${{ env.AWS_REGION }}" \
+            --lambda-name "${{ env.LAMBDA_NAME }}" \
+            --lambda-role-arn "${{ env.LAMBDA_ROLE_ARN }}" \
+            --bucket "${{ env.S3_BUCKET }}" \
+            --datacapture-prefix "${{ env.DATACAPTURE_S3_PREFIX }}" \
+            --baseline-s3-uri "${{ env.BASELINE_S3_URI }}" \
+            --metric-namespace "${{ env.METRIC_NAMESPACE }}" \
+            --alarm-name "${{ env.ALARM_NAME }}" \
+            --drift-threshold "${{ env.DRIFT_THRESHOLD }}" \
+            --alert-email "${{ env.ALERT_EMAIL }}"
