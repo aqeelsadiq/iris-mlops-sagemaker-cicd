@@ -54,10 +54,12 @@ jobs:
 
       - name: Enable Data Capture
         run: |
-          python monitoring/enable_data_capture.py \
-            --region $AWS_REGION \
-            --endpoint-name $ENDPOINT_NAME \
-            --capture-s3-uri $DATACAPTURE_S3_URI
+            python monitoring/enable_data_capture.py \
+                --region $AWS_REGION \
+                --endpoint-name iris-endpoint \
+                --capture-s3-uri s3://sagemaker-aqeel-iris-us-east-1-387867038403/datacapture/ \
+                --sampling-percentage 100
+          
 
       - name: Create Baseline
         run: |
