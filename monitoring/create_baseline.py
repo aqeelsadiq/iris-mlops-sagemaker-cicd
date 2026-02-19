@@ -12,7 +12,7 @@ def parse_args():
     p.add_argument("--role-arn", required=True)
     p.add_argument("--baseline-data-s3-uri", required=True)
     p.add_argument("--baseline-output-s3-uri", required=True)
-    p.add_argument("--instance-type", default="ml.m5.2xlarge")  # ✅ safer default
+    p.add_argument("--instance-type", default="ml.m5.large")  # ✅ safer default
     p.add_argument("--instance-count", type=int, default=1)
     p.add_argument("--volume-size", type=int, default=30)
     p.add_argument("--max-runtime", type=int, default=3600)
