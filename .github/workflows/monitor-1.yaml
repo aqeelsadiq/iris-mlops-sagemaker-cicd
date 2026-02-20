@@ -1,0 +1,65 @@
+name: SageMaker Model Monitor (Iris)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  model_monitor:
+    runs-on: ubuntu-latest
+
+    env:
+      AWS_REGION: us-east-1
+      ENDPOINT_NAME: iris-endpoint
+      SAGEMAKER_EXEC_ROLE_ARN: arn:aws:iam::387867038403:role/AqeelIrisSageMakerExecutionRole
+
+      S3_BUCKET: sagemaker-aqeel-iris-us-east-1-387867038403
+
+      BASELINE_DATASET_S3_URI: s3://sagemaker-aqeel-iris-us-east-1-387867038403/datasets/iris/features.csv
+      BASELINE_OUTPUT_S3_URI: s3://sagemaker-aqeel-iris-us-east-1-387867038403/monitoring/baseline
+      REPORTS_S3_URI: s3://sagemaker-aqeel-iris-us-east-1-387867038403/monitoring/reports
+      DATACAPTURE_S3_URI: s3://sagemaker-aqeel-iris-us-east-1-387867038403/monitoring/datacapture
+
+      SCHEDULE_NAME: aqeel-iris-model-monitor
+      PROCESSING_INSTANCE_TYPE: ml.t3.medium
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r monitoring/requirements.txt
+
+      - name: Create/Update Baseline (Model Monitor)
+        run: |
+          python monitoring/mm_create_baseline.py \
+            --region "${{ env.AWS_REGION }}" \
+            --role-arn "${{ env.SAGEMAKER_EXEC_ROLE_ARN }}" \
+            --baseline-data-s3-uri "${{ env.BASELINE_DATASET_S3_URI }}" \
+            --baseline-output-s3-uri "${{ env.BASELINE_OUTPUT_S3_URI }}" \
+            --instance-type "${{ env.PROCESSING_INSTANCE_TYPE }}"
+
+      - name: Create/Update Monitoring Schedule (Model Monitor)
+        run: |
+          python monitoring/mm_create_schedule.py \
+            --region "${{ env.AWS_REGION }}" \
+            --role-arn "${{ env.SAGEMAKER_EXEC_ROLE_ARN }}" \
+            --endpoint-name "${{ env.ENDPOINT_NAME }}" \
+            --schedule-name "${{ env.SCHEDULE_NAME }}" \
+            --baseline-output-s3-uri "${{ env.BASELINE_OUTPUT_S3_URI }}" \
+            --reports-s3-uri "${{ env.REPORTS_S3_URI }}" \
+            --datacapture-s3-uri "${{ env.DATACAPTURE_S3_URI }}" \
+            --instance-type "${{ env.PROCESSING_INSTANCE_TYPE }}" \
+            --cron "cron(0 * ? * * *)"
