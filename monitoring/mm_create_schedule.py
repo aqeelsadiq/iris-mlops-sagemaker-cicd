@@ -110,7 +110,7 @@ def main():
         schedule_cron_expression=args.cron,
         monitoring_inputs=monitoring_inputs,
         # This format matches DataCapture jsonl
-        dataset_format=DatasetFormat.json_lines(),
+        dataset_format=DatasetFormat.json(),
     )
 
     print("✅ Monitoring schedule created:", args.schedule_name)
