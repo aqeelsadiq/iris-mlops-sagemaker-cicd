@@ -3,9 +3,8 @@ import argparse
 import boto3
 import sagemaker
 from sagemaker.model_monitor import DefaultModelMonitor
+from sagemaker.model_monitor import EndpointInput
 from sagemaker.model_monitor.dataset_format import DatasetFormat
-from sagemaker.processing import ProcessingInput
-from botocore.exceptions import ClientError
 
 
 def parse_args():
@@ -17,26 +16,16 @@ def parse_args():
     p.add_argument("--endpoint-name", required=True)
     p.add_argument("--schedule-name", required=True)
 
-    # Where baseline artifacts exist (must contain statistics.json + constraints.json)
-    p.add_argument("--baseline-s3-uri", required=True)
+    p.add_argument("--baseline-s3-uri", required=True)        # folder containing statistics.json + constraints.json
+    p.add_argument("--monitor-output-s3-uri", required=True)  # where reports go
+    p.add_argument("--datacapture-s3-uri", required=True)     # s3://bucket/monitoring/datacapture/
 
-    # Where monitoring outputs/reports should be written
-    p.add_argument("--monitor-output-s3-uri", required=True)
-
-    # DataCapture prefix (S3 URI) - OPTIONAL but recommended
-    # Example: s3://bucket/monitoring/datacapture/
-    p.add_argument("--datacapture-s3-uri", required=True)
-
-    # processing infra
     p.add_argument("--instance-type", default="ml.m5.large")
     p.add_argument("--instance-count", type=int, default=1)
     p.add_argument("--volume-size", type=int, default=20)
     p.add_argument("--max-runtime", type=int, default=3600)
 
-    # schedule
-    # hourly example: cron(0 * ? * * *)
-    p.add_argument("--cron", default="cron(0 * ? * * *)")
-
+    p.add_argument("--cron", default="cron(0 * ? * * *)")     # hourly
     return p.parse_args()
 
 
@@ -53,7 +42,7 @@ def delete_existing_schedule(sm_client, name: str):
     print(f"ℹ️ Monitoring schedule exists, deleting: {name}")
     sm_client.delete_monitoring_schedule(MonitoringScheduleName=name)
 
-    # wait a bit until it's deleted
+    # Wait until deleted
     waiter = sm_client.get_waiter("monitoring_schedule_deleted")
     waiter.wait(MonitoringScheduleName=name)
     print("✅ Deleted old schedule.")
@@ -70,15 +59,14 @@ def main():
     baseline_constraints = s3_join(args.baseline_s3_uri, "constraints.json")
 
     print("Creating/updating monitoring schedule...")
-    print("Schedule :", args.schedule_name)
-    print("Endpoint :", args.endpoint_name)
-    print("Baseline :", args.baseline_s3_uri)
-    print("Reports  :", args.monitor_output_s3_uri)
-    print("Capture  :", args.datacapture_s3_uri)
-    print("Stats    :", baseline_stats)
-    print("Constraints:", baseline_constraints)
+    print("Schedule    :", args.schedule_name)
+    print("Endpoint    :", args.endpoint_name)
+    print("Baseline    :", args.baseline_s3_uri)
+    print("Reports     :", args.monitor_output_s3_uri)
+    print("DataCapture :", args.datacapture_s3_uri)
+    print("Stats       :", baseline_stats)
+    print("Constraints :", baseline_constraints)
 
-    # If schedule already exists, delete and recreate (simplest + avoids update issues)
     delete_existing_schedule(sm_client, args.schedule_name)
 
     monitor = DefaultModelMonitor(
@@ -90,31 +78,29 @@ def main():
         sagemaker_session=sess,
     )
 
-    # IMPORTANT:
-    # monitoring_inputs tells the job where your captured endpoint data is.
-    # DataCapture produces JSONLines (.jsonl)
-    monitoring_inputs = [
-        ProcessingInput(
-            source=args.datacapture_s3_uri.rstrip("/") + "/",
-            destination="/opt/ml/processing/input",
-            input_name="endpoint-data-capture",
-        )
-    ]
+    # ✅ Correct way for SDKs that don’t accept endpoint_name=
+    endpoint_input = EndpointInput(
+        endpoint_name=args.endpoint_name,
+        destination="/opt/ml/processing/input",
+        s3_data_distribution_type="FullyReplicated",
+        s3_input_mode="File",
+    )
 
+    # ✅ DataCapture stores .jsonl; DatasetFormat.json() works best across versions
     monitor.create_monitoring_schedule(
         monitor_schedule_name=args.schedule_name,
-        endpoint_name=args.endpoint_name,
+        endpoint_input=endpoint_input,
         output_s3_uri=args.monitor_output_s3_uri,
         statistics=baseline_stats,
         constraints=baseline_constraints,
         schedule_cron_expression=args.cron,
-        monitoring_inputs=monitoring_inputs,
-        # This format matches DataCapture jsonl
+        # Some SDKs accept this; if your SDK complains, remove dataset_format line
         dataset_format=DatasetFormat.json(),
     )
 
     print("✅ Monitoring schedule created:", args.schedule_name)
-    print("Next: wait for first execution (based on cron), then check S3 reports prefix.")
+    print("Next: invoke endpoint a few times, then wait for the cron window.")
+    print("Check reports in:", args.monitor_output_s3_uri)
 
 
 if __name__ == "__main__":
