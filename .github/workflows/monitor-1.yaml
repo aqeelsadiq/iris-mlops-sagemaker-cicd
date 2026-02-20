@@ -54,12 +54,12 @@ jobs:
       - name: Create/Update Monitoring Schedule (Model Monitor)
         run: |
           python monitoring/mm_create_schedule.py \
-            --region "${{ env.AWS_REGION }}" \
-            --role-arn "${{ env.SAGEMAKER_EXEC_ROLE_ARN }}" \
-            --endpoint-name "${{ env.ENDPOINT_NAME }}" \
-            --schedule-name "${{ env.SCHEDULE_NAME }}" \
-            --baseline-s3-uri "${{ env.BASELINE_OUTPUT_S3_URI }}" \
-            --monitor-output-s3-uri "${{ env.REPORTS_S3_URI }}" \
-            --datacapture-s3-uri "${{ env.DATACAPTURE_S3_URI }}" \
+            --region $AWS_REGION \
+            --role-arn $SAGEMAKER_EXEC_ROLE_ARN \
+            --endpoint-name $ENDPOINT_NAME \
+            --schedule-name aqeel-iris-model-monitor \
+            --baseline-s3-uri s3://sagemaker-aqeel-iris-us-east-1-387867038403/monitoring/baseline/ \
+            --monitor-output-s3-uri s3://sagemaker-aqeel-iris-us-east-1-387867038403/monitoring/reports/ \
+            --datacapture-s3-uri s3://sagemaker-aqeel-iris-us-east-1-387867038403/monitoring/datacapture/ \
             --cron "cron(0 * ? * * *)" \
-            --instance-type "ml.t3.medium"
+            --instance-type ml.m5.large
