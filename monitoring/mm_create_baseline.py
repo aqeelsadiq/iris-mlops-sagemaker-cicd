@@ -32,7 +32,7 @@ def main():
         instance_count=args.instance_count,
         instance_type=args.instance_type,
         sagemaker_session=sm_sess,
-        volume_size_in_gb=20,
+        volume_size_in_gb=30,
         max_runtime_in_seconds=3600,
     )
 

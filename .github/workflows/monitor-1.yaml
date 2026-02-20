@@ -20,7 +20,7 @@ jobs:
       DATACAPTURE_S3_URI: s3://sagemaker-aqeel-iris-us-east-1-387867038403/monitoring/datacapture
 
       SCHEDULE_NAME: aqeel-iris-model-monitor
-      PROCESSING_INSTANCE_TYPE: ml.t3.medium
+      PROCESSING_INSTANCE_TYPE: ml.t3.large
 
     steps:
       - uses: actions/checkout@v4
