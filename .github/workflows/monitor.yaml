@@ -127,6 +127,7 @@ jobs:
       # alarm
       ALARM_NAME: aqeel-iris-drift-alarm
       DRIFT_THRESHOLD: "0.2"   # tune this
+      SNS_TOPIC_NAME: aqeel-iris-monitoring-topic
 
     steps:
       - uses: actions/checkout@v4
@@ -171,8 +172,9 @@ jobs:
             --lambda-role-arn "${{ env.LAMBDA_ROLE_ARN }}" \
             --bucket "${{ env.S3_BUCKET }}" \
             --datacapture-prefix "${{ env.DATACAPTURE_S3_PREFIX }}" \
-            --baseline-s3-uri "${{ env.BASELINE_S3_URI }}" \
-            --metric-namespace "${{ env.METRIC_NAMESPACE }}" \
+            --sns-topic-name "${{ env.SNS_TOPIC_NAME }}" \
+            --alert-email "${{ env.ALERT_EMAIL }}" \
             --alarm-name "${{ env.ALARM_NAME }}" \
-            --drift-threshold "${{ env.DRIFT_THRESHOLD }}" \
-            --alert-email "${{ env.ALERT_EMAIL }}"
+            --alarm-threshold 1 \
+            --alarm-period 300 \
+            --alarm-evaluation-periods 1
