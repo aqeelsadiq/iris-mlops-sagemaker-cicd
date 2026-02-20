@@ -62,4 +62,4 @@ jobs:
             --monitor-output-s3-uri s3://sagemaker-aqeel-iris-us-east-1-387867038403/monitoring/reports/ \
             --datacapture-s3-uri s3://sagemaker-aqeel-iris-us-east-1-387867038403/monitoring/datacapture/ \
             --cron "cron(0 * ? * * *)" \
-            --instance-type ml.m5.large
+            --instance-type ml.t3.medium
