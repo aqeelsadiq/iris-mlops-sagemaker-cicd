@@ -58,8 +58,8 @@ jobs:
             --role-arn "${{ env.SAGEMAKER_EXEC_ROLE_ARN }}" \
             --endpoint-name "${{ env.ENDPOINT_NAME }}" \
             --schedule-name "${{ env.SCHEDULE_NAME }}" \
-            --baseline-output-s3-uri "${{ env.BASELINE_OUTPUT_S3_URI }}" \
-            --reports-s3-uri "${{ env.REPORTS_S3_URI }}" \
+            --baseline-s3-uri "${{ env.BASELINE_OUTPUT_S3_URI }}" \
+            --monitor-output-s3-uri "${{ env.REPORTS_S3_URI }}" \
             --datacapture-s3-uri "${{ env.DATACAPTURE_S3_URI }}" \
-            --instance-type "${{ env.PROCESSING_INSTANCE_TYPE }}" \
-            --cron "cron(0 * ? * * *)"
+            --cron "cron(0 * ? * * *)" \
+            --instance-type "ml.t3.medium"
