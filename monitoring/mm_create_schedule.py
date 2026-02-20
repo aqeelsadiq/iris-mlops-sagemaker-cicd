@@ -2,9 +2,8 @@
 import argparse
 import boto3
 import sagemaker
-from sagemaker.model_monitor import DefaultModelMonitor
-from sagemaker.model_monitor import EndpointInput
-from sagemaker.model_monitor.dataset_format import DatasetFormat
+from botocore.exceptions import ClientError
+from sagemaker.model_monitor import DefaultModelMonitor, EndpointInput
 
 
 def parse_args():
@@ -16,16 +15,24 @@ def parse_args():
     p.add_argument("--endpoint-name", required=True)
     p.add_argument("--schedule-name", required=True)
 
-    p.add_argument("--baseline-s3-uri", required=True)        # folder containing statistics.json + constraints.json
-    p.add_argument("--monitor-output-s3-uri", required=True)  # where reports go
-    p.add_argument("--datacapture-s3-uri", required=True)     # s3://bucket/monitoring/datacapture/
+    # Folder containing statistics.json + constraints.json
+    p.add_argument("--baseline-s3-uri", required=True)
 
+    # Where monitoring outputs/reports should be written
+    p.add_argument("--monitor-output-s3-uri", required=True)
+
+    # Keeping it in args for your workflow compatibility (not always required by SDK)
+    p.add_argument("--datacapture-s3-uri", required=True)
+
+    # processing infra
     p.add_argument("--instance-type", default="ml.m5.large")
     p.add_argument("--instance-count", type=int, default=1)
     p.add_argument("--volume-size", type=int, default=20)
     p.add_argument("--max-runtime", type=int, default=3600)
 
-    p.add_argument("--cron", default="cron(0 * ? * * *)")     # hourly
+    # hourly example: cron(0 * ? * * *)
+    p.add_argument("--cron", default="cron(0 * ? * * *)")
+
     return p.parse_args()
 
 
@@ -42,10 +49,17 @@ def delete_existing_schedule(sm_client, name: str):
     print(f"ℹ️ Monitoring schedule exists, deleting: {name}")
     sm_client.delete_monitoring_schedule(MonitoringScheduleName=name)
 
-    # Wait until deleted
-    waiter = sm_client.get_waiter("monitoring_schedule_deleted")
-    waiter.wait(MonitoringScheduleName=name)
-    print("✅ Deleted old schedule.")
+    # waiter name varies in some SDKs/accounts; do a simple poll to be safe
+    for _ in range(60):
+        try:
+            sm_client.describe_monitoring_schedule(MonitoringScheduleName=name)
+        except sm_client.exceptions.ResourceNotFound:
+            print("✅ Deleted old schedule.")
+            return
+        import time
+        time.sleep(5)
+
+    raise TimeoutError(f"Timed out waiting for schedule deletion: {name}")
 
 
 def main():
@@ -67,6 +81,7 @@ def main():
     print("Stats       :", baseline_stats)
     print("Constraints :", baseline_constraints)
 
+    # Recreate schedule (avoid update edge cases)
     delete_existing_schedule(sm_client, args.schedule_name)
 
     monitor = DefaultModelMonitor(
@@ -78,29 +93,44 @@ def main():
         sagemaker_session=sess,
     )
 
-    # ✅ Correct way for SDKs that don’t accept endpoint_name=
     endpoint_input = EndpointInput(
         endpoint_name=args.endpoint_name,
         destination="/opt/ml/processing/input",
-        s3_data_distribution_type="FullyReplicated",
-        s3_input_mode="File",
     )
 
-    # ✅ DataCapture stores .jsonl; DatasetFormat.json() works best across versions
-    monitor.create_monitoring_schedule(
-        monitor_schedule_name=args.schedule_name,
-        endpoint_input=endpoint_input,
-        output_s3_uri=args.monitor_output_s3_uri,
-        statistics=baseline_stats,
-        constraints=baseline_constraints,
-        schedule_cron_expression=args.cron,
-        # Some SDKs accept this; if your SDK complains, remove dataset_format line
-        dataset_format=DatasetFormat.json(),
-    )
+    # ✅ Compatibility strategy:
+    # Some SDKs accept endpoint_input, some accept endpoint_input + other params.
+    # Your SDK DOES NOT accept dataset_format, so we NEVER pass it.
+    try:
+        monitor.create_monitoring_schedule(
+            monitor_schedule_name=args.schedule_name,
+            endpoint_input=endpoint_input,
+            output_s3_uri=args.monitor_output_s3_uri,
+            statistics=baseline_stats,
+            constraints=baseline_constraints,
+            schedule_cron_expression=args.cron,
+        )
+    except TypeError as e:
+        # Fallback for older signature variants (rare, but helps)
+        # Try without endpoint_input and use endpoint_name if supported
+        msg = str(e)
+        print("⚠️ TypeError calling create_monitoring_schedule:", msg)
+        print("Trying fallback signature...")
+
+        monitor.create_monitoring_schedule(
+            monitor_schedule_name=args.schedule_name,
+            endpoint_name=args.endpoint_name,
+            output_s3_uri=args.monitor_output_s3_uri,
+            statistics=baseline_stats,
+            constraints=baseline_constraints,
+            schedule_cron_expression=args.cron,
+        )
 
     print("✅ Monitoring schedule created:", args.schedule_name)
-    print("Next: invoke endpoint a few times, then wait for the cron window.")
-    print("Check reports in:", args.monitor_output_s3_uri)
+    print("Next steps:")
+    print("1) Invoke endpoint a few times (to generate DataCapture)")
+    print("2) Wait until next cron window triggers the monitoring job")
+    print("3) Check SageMaker -> Model monitor schedules and S3 reports prefix")
 
 
 if __name__ == "__main__":
