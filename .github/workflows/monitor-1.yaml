@@ -57,7 +57,7 @@ jobs:
       # 1) Enable DataCapture on the endpoint (idempotent)
       - name: Enable Data Capture (EndpointConfig update)
         run: |
-          python monitoring/enable_datacapture.py \
+          python monitoring/enable_data_capture.py \
             --region "${{ env.AWS_REGION }}" \
             --endpoint-name "${{ env.ENDPOINT_NAME }}" \
             --capture-s3-uri "${{ env.DATACAPTURE_S3_URI }}" \
