@@ -28,7 +28,7 @@ jobs:
 
       # Monitoring schedule
       SCHEDULE_NAME: aqeel-iris-model-monitor
-      CRON: cron(0 * ? * * *)  # hourly
+      CRON: cron(*/15 * ? * * *) 
       PROCESSING_INSTANCE_TYPE: ml.t3.large
 
       # Alerting (SNS topic name)
@@ -86,7 +86,10 @@ jobs:
             --monitor-output-s3-uri "${{ env.REPORTS_S3_URI }}" \
             --datacapture-s3-uri "${{ env.DATACAPTURE_S3_URI }}" \
             --cron "${{ env.CRON }}" \
-            --instance-type "${{ env.PROCESSING_INSTANCE_TYPE }}"
+            --instance-type "${{ env.PROCESSING_INSTANCE_TYPE }}" \
+            --instance-count 1 \
+            --volume-size 50 \
+            --max-runtime 7200
 
       # 4) Create SNS + CloudWatch alarm for drift (constraint violations)
       # IMPORTANT: add GitHub secret ALERT_EMAIL (your email) and confirm subscription from inbox.
