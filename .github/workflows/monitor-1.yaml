@@ -89,7 +89,7 @@ jobs:
             --instance-type "${{ env.PROCESSING_INSTANCE_TYPE }}" \
             --instance-count 1 \
             --volume-size 50 \
-            --max-runtime 7200
+            --max-runtime 1800
 
       # 4) Create SNS + CloudWatch alarm for drift (constraint violations)
       # IMPORTANT: add GitHub secret ALERT_EMAIL (your email) and confirm subscription from inbox.
