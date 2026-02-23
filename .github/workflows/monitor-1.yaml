@@ -96,7 +96,7 @@ jobs:
             --region "${{ env.AWS_REGION }}" \
             --schedule-name "${{ env.SCHEDULE_NAME }}" \
             --sns-topic-name "${{ env.SNS_TOPIC_NAME }}" \
-            --email "${{ secrets.ALERT_EMAIL }}"
+            --email "aqeel.sadiq3456@gmail.com"
 
 
 
