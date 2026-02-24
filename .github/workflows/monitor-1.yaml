@@ -98,8 +98,18 @@ jobs:
           python monitoring/mm_create_drift_alarm.py \
             --region "${{ env.AWS_REGION }}" \
             --schedule-name "${{ env.SCHEDULE_NAME }}" \
+            --endpoint-name "${{ env.ENDPOINT_NAME }}" \
             --sns-topic-name "${{ env.SNS_TOPIC_NAME }}" \
             --email "aqeel.sadiq3456@gmail.com"
 
 
-            
+
+      # - name: Create Drift Alarm (CloudWatch + SNS)
+      #   run: |
+      #     python monitoring/mm_create_drift_alarm.py \
+      #       --region "${{ env.AWS_REGION " \
+      #       --schedule-name "${{ env.SCHEDULE_NAME " \
+      #       --sns-topic-name "${{ env.SNS_TOPIC_NAME " \
+      #       --email "aqeel.sadiq3456@gmail.com"
+
+

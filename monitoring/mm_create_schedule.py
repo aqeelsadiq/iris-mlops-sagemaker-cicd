@@ -109,6 +109,7 @@ def main():
             statistics=baseline_stats,
             constraints=baseline_constraints,
             schedule_cron_expression=args.cron,
+            enable_cloudwatch_metrics=True,
         )
     except TypeError as e:
         # Fallback for older signature variants (rare, but helps)
