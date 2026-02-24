@@ -1,87 +1,66 @@
 # monitoring/record_preprocessor.py
-import os
 import json
-import glob
 
-INPUT_DIR = "/opt/ml/processing/input"
-OUTPUT_DIR = "/opt/ml/processing/output"
+FEATURES = ["sepal_length", "sepal_width", "petal_length", "petal_width"]
 
-# Your baseline column order (must match baseline/features.csv)
-HEADER = ["sepal_length", "sepal_width", "petal_length", "petal_width"]
-
-
-def extract_features_from_capture(record: dict):
-    """
-    DataCapture JSON structure usually contains endpointInput / endpointOutput.
-    We only need endpointInput (the request sent to the endpoint).
-    """
-    cap = record.get("captureData", {})
-
-    ep_in = cap.get("endpointInput", {})
-    data = ep_in.get("data", None)
-    content_type = ep_in.get("contentType", "")
-
-    if data is None:
+def _parse_csv(data: str):
+    parts = [p.strip() for p in data.strip().split(",")]
+    if len(parts) < 4:
+        return None
+    try:
+        return [float(parts[0]), float(parts[1]), float(parts[2]), float(parts[3])]
+    except Exception:
         return None
 
-    # If request was JSON, it may look like: {"instances":[[...]]} or [[...]]
-    if "application/json" in content_type:
-        try:
-            obj = json.loads(data)
-            if isinstance(obj, dict) and "instances" in obj:
-                row = obj["instances"][0]
-            elif isinstance(obj, list):
-                row = obj[0] if len(obj) > 0 and isinstance(obj[0], list) else obj
-            else:
-                return None
-            return [float(x) for x in row[:4]]
-        except Exception:
-            return None
+def _parse_json(data: str):
+    try:
+        obj = json.loads(data)
+    except Exception:
+        return None
 
-    # If request was CSV: "5.1,3.5,1.4,0.2"
-    if "text/csv" in content_type or "csv" in content_type:
-        try:
-            parts = [p.strip() for p in data.strip().split(",")]
-            return [float(x) for x in parts[:4]]
-        except Exception:
-            return None
+    row = None
+    if isinstance(obj, dict) and "instances" in obj and obj["instances"]:
+        row = obj["instances"][0]
+    elif isinstance(obj, list):
+        row = obj[0] if (obj and isinstance(obj[0], list)) else obj
 
-    return None
+    if not isinstance(row, list) or len(row) < 4:
+        return None
 
+    try:
+        return [float(row[0]), float(row[1]), float(row[2]), float(row[3])]
+    except Exception:
+        return None
 
-def main():
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    out_path = os.path.join(OUTPUT_DIR, "preprocessed.csv")
+def preprocess_handler(inference_record, logger=None):
+    """
+    REQUIRED by SageMaker Model Monitor.
+    Return dict (one row) or [] to skip record.
+    """
+    try:
+        ep_in = inference_record.endpoint_input
+        content_type = (ep_in.content_type or "").lower()
+        data = ep_in.data
+    except Exception as e:
+        if logger:
+            logger.warning(f"Cannot read endpoint_input: {e}")
+        return []
 
-    # Collect all captured files downloaded by Model Monitor
-    files = glob.glob(os.path.join(INPUT_DIR, "**", "*"), recursive=True)
-    files = [f for f in files if os.path.isfile(f)]
+    if data is None:
+        return []
 
-    rows = []
-    for f in files:
-        # DataCapture files are JSON lines
-        try:
-            with open(f, "r", encoding="utf-8") as fh:
-                for line in fh:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    rec = json.loads(line)
-                    feats = extract_features_from_capture(rec)
-                    if feats is not None and len(feats) == 4:
-                        rows.append(feats)
-        except Exception:
-            # ignore non-json capture artifacts
-            continue
+    if isinstance(data, (bytes, bytearray)):
+        data = data.decode("utf-8", errors="ignore")
 
-    # Write CSV with HEADER (because your baseline is header=True)
-    with open(out_path, "w", encoding="utf-8") as out:
-        out.write(",".join(HEADER) + "\n")
-        for r in rows:
-            out.write(",".join(str(x) for x in r) + "\n")
+    values = _parse_json(data) if "json" in content_type else _parse_csv(data)
+    if values is None:
+        if logger:
+            logger.warning(f"Skipping un-parseable record: ct={content_type}, data={str(data)[:200]}")
+        return []
 
-    print(f"✅ Wrote {len(rows)} rows to {out_path}")
-
-
-if __name__ == "__main__":
-    main()
+    return {
+        FEATURES[0]: values[0],
+        FEATURES[1]: values[1],
+        FEATURES[2]: values[2],
+        FEATURES[3]: values[3],
+    }
