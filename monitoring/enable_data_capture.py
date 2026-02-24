@@ -38,7 +38,8 @@ def main():
             "EnableCapture": True,
             "InitialSamplingPercentage": args.sampling_percentage,
             "DestinationS3Uri": args.capture_s3_uri,
-            "CaptureOptions": [{"CaptureMode": "Input"}, {"CaptureMode": "Output"}],
+            "CaptureOptions": [{"CaptureMode": "Input"}],
+            # "CaptureOptions": [{"CaptureMode": "Input"}, {"CaptureMode": "Output"}],
             "CaptureContentTypeHeader": {
                 "CsvContentTypes": ["text/csv"],
                 "JsonContentTypes": ["application/json"],
