@@ -1,14 +1,206 @@
-# monitoring/record_preprocessor.py
+# # monitoring/record_preprocessor.py
+# """
+# SageMaker Model Monitor record preprocessor.
+
+# Goal:
+# - Always output the expected 4 feature columns so Model Monitor doesn't see "0 columns".
+# - Robustly parse common CSV/JSON request shapes.
+# - If a record is unparseable, emit NaNs (instead of skipping) to keep schema consistent.
+
+# Expected output columns (baseline constraints should match):
+#   sepal_length, sepal_width, petal_length, petal_width
+# """
+
+# import json
+# import base64
+# import math
+# import re
+
+# FEATURES = ["sepal_length", "sepal_width", "petal_length", "petal_width"]
+
+
+# def _get_attr(obj, *names, default=None):
+#     """Safely read an attribute from obj using multiple possible names."""
+#     for n in names:
+#         if hasattr(obj, n):
+#             v = getattr(obj, n)
+#             if v is not None:
+#                 return v
+#     return default
+
+
+# def _nan_row():
+#     """Return a row with the correct columns but NaN values."""
+#     return {f: math.nan for f in FEATURES}
+
+
+# def _as_float4(x):
+#     """Convert list/tuple to 4 floats."""
+#     if not isinstance(x, (list, tuple)) or len(x) < 4:
+#         return None
+#     try:
+#         return [float(x[0]), float(x[1]), float(x[2]), float(x[3])]
+#     except Exception:
+#         return None
+
+
+# def _parse_json_any(obj):
+#     """
+#     Accept common JSON shapes:
+#       - {"instances":[[...]]}
+#       - {"instances":[...]}
+#       - {"inputs":[...]} / {"features":[...]} / {"data":[...]}
+#       - {"sepal_length":5.1, "sepal_width":3.5, ...}
+#       - [[...]] / [...]
+#     """
+#     if isinstance(obj, dict):
+#         # Direct feature dict
+#         if all(k in obj for k in FEATURES):
+#             try:
+#                 return [float(obj[f]) for f in FEATURES]
+#             except Exception:
+#                 return None
+
+#         # Wrapper keys
+#         for key in ["instances", "inputs", "features", "data"]:
+#             if key in obj:
+#                 v = obj[key]
+#                 if isinstance(v, list) and v:
+#                     if isinstance(v[0], list):
+#                         return _as_float4(v[0])
+#                     return _as_float4(v)
+
+#         return None
+
+#     if isinstance(obj, list):
+#         if obj and isinstance(obj[0], list):
+#             return _as_float4(obj[0])
+#         return _as_float4(obj)
+
+#     return None
+
+
+# def _parse_csv(s: str):
+#     """
+#     Parse CSV (or whitespace-separated) numeric payloads.
+#     - tolerates newlines (takes the last non-empty line)
+#     - tolerates header lines (header won't parse to float, so it will fall through)
+#     - splits on commas OR whitespace
+#     """
+#     s = (s or "").strip()
+#     if not s:
+#         return None
+
+#     lines = [ln.strip() for ln in s.splitlines() if ln.strip()]
+#     if not lines:
+#         return None
+
+#     # If the request accidentally includes header + data, last line is typically the data row.
+#     last = lines[-1]
+
+#     # Split on comma or whitespace (handles: "1,2,3,4" or "1 2 3 4")
+#     parts = [p.strip() for p in re.split(r"[,\s]+", last) if p.strip()]
+#     if len(parts) < 4:
+#         return None
+
+#     try:
+#         return [float(parts[0]), float(parts[1]), float(parts[2]), float(parts[3])]
+#     except Exception:
+#         return None
+
+
+# def preprocess_handler(inference_record, logger=None):
+#     """
+#     REQUIRED by SageMaker Model Monitor.
+#     Must return:
+#       - dict representing one row, OR
+#       - [] to skip.
+
+#     We intentionally DO NOT skip unparseable records. We emit NaNs to keep schema stable
+#     and avoid "Number of columns in current dataset: 0".
+#     """
+#     # Read endpoint input record
+#     try:
+#         ep_in = inference_record.endpoint_input
+#     except Exception as e:
+#         if logger:
+#             logger.warning(f"Cannot read endpoint_input: {e}")
+#         return _nan_row()
+
+#     data = _get_attr(ep_in, "data")
+#     if data is None:
+#         return _nan_row()
+
+#     # Content-Type: in capture records this often appears as observedContentType
+#     content_type = (
+#         _get_attr(ep_in, "content_type", "observed_content_type", "observedContentType", default="") or ""
+#     ).lower()
+
+#     # Encoding: may be BASE64 for captured payloads
+#     encoding = (_get_attr(ep_in, "encoding", default="") or "").upper()
+
+#     # bytes -> str
+#     if isinstance(data, (bytes, bytearray)):
+#         data = data.decode("utf-8", errors="ignore")
+
+#     # BASE64 decode if needed
+#     if encoding == "BASE64" and isinstance(data, str):
+#         try:
+#             data = base64.b64decode(data).decode("utf-8", errors="ignore")
+#         except Exception as e:
+#             if logger:
+#                 logger.warning(f"BASE64 decode failed: {e}")
+#             return _nan_row()
+
+#     values = None
+
+#     # Parse JSON
+#     if "json" in content_type:
+#         try:
+#             obj = json.loads(data) if isinstance(data, str) else data
+#         except Exception:
+#             obj = data  # if already dict/list
+#         values = _parse_json_any(obj)
+#     else:
+#         # Parse CSV
+#         if isinstance(data, str):
+#             values = _parse_csv(data)
+
+#     # If unparseable: emit NaNs (do NOT skip)
+#     if values is None:
+#         if logger:
+#             logger.warning(
+#                 f"Unparseable record -> emitting NaNs. ct={content_type} enc={encoding} sample={str(data)[:200]}"
+#             )
+#         return _nan_row()
+
+#     # Build stable output schema
+#     return {
+#         FEATURES[0]: values[0],
+#         FEATURES[1]: values[1],
+#         FEATURES[2]: values[2],
+#         FEATURES[3]: values[3],
+#     }
+
+
+
+
+#claude code
 """
-SageMaker Model Monitor record preprocessor.
+record_preprocessor.py
+-----------------------
+SageMaker Model Monitor record preprocessor for the Iris dataset.
+
+This script is uploaded to S3 and passed to both:
+  1. suggest_baseline()      → so baseline statistics match the schema
+  2. create_monitoring_schedule() → so live captures are parsed the same way
 
 Goal:
-- Always output the expected 4 feature columns so Model Monitor doesn't see "0 columns".
-- Robustly parse common CSV/JSON request shapes.
-- If a record is unparseable, emit NaNs (instead of skipping) to keep schema consistent.
-
-Expected output columns (baseline constraints should match):
-  sepal_length, sepal_width, petal_length, petal_width
+  - Always emit exactly 4 named float columns:
+      sepal_length, sepal_width, petal_length, petal_width
+  - Robustly parse common payload shapes (CSV, JSON).
+  - On parse failure, emit NaN values (keeps schema consistent and avoids
+    the "Number of columns in current dataset: 0" error).
 """
 
 import json
@@ -16,165 +208,172 @@ import base64
 import math
 import re
 
+# ── Column schema ──────────────────────────────────────────────────────────────
 FEATURES = ["sepal_length", "sepal_width", "petal_length", "petal_width"]
 
 
-def _get_attr(obj, *names, default=None):
-    """Safely read an attribute from obj using multiple possible names."""
-    for n in names:
-        if hasattr(obj, n):
-            v = getattr(obj, n)
-            if v is not None:
-                return v
-    return default
-
+# ── Helpers ────────────────────────────────────────────────────────────────────
 
 def _nan_row():
-    """Return a row with the correct columns but NaN values."""
+    """Fallback row: correct schema, NaN values."""
     return {f: math.nan for f in FEATURES}
 
 
-def _as_float4(x):
-    """Convert list/tuple to 4 floats."""
-    if not isinstance(x, (list, tuple)) or len(x) < 4:
+def _to_float4(seq):
+    """Convert a list/tuple with ≥4 elements to [float, float, float, float]."""
+    if not isinstance(seq, (list, tuple)) or len(seq) < 4:
         return None
     try:
-        return [float(x[0]), float(x[1]), float(x[2]), float(x[3])]
-    except Exception:
+        return [float(seq[0]), float(seq[1]), float(seq[2]), float(seq[3])]
+    except (TypeError, ValueError):
         return None
 
 
-def _parse_json_any(obj):
+def _parse_json(obj):
     """
-    Accept common JSON shapes:
-      - {"instances":[[...]]}
-      - {"instances":[...]}
-      - {"inputs":[...]} / {"features":[...]} / {"data":[...]}
-      - {"sepal_length":5.1, "sepal_width":3.5, ...}
-      - [[...]] / [...]
+    Accept common JSON request shapes:
+      • {"sepal_length": 5.1, "sepal_width": 3.5, "petal_length": 1.4, "petal_width": 0.2}
+      • {"instances": [[5.1, 3.5, 1.4, 0.2]]}
+      • {"instances": [5.1, 3.5, 1.4, 0.2]}
+      • {"inputs": [...]} / {"features": [...]} / {"data": [...]}
+      • [[5.1, 3.5, 1.4, 0.2]]
+      • [5.1, 3.5, 1.4, 0.2]
+    Returns a list of 4 floats, or None.
     """
     if isinstance(obj, dict):
-        # Direct feature dict
+        # Named columns dict
         if all(k in obj for k in FEATURES):
             try:
                 return [float(obj[f]) for f in FEATURES]
-            except Exception:
+            except (TypeError, ValueError):
                 return None
 
         # Wrapper keys
-        for key in ["instances", "inputs", "features", "data"]:
+        for key in ("instances", "inputs", "features", "data"):
             if key in obj:
                 v = obj[key]
                 if isinstance(v, list) and v:
-                    if isinstance(v[0], list):
-                        return _as_float4(v[0])
-                    return _as_float4(v)
-
+                    first = v[0]
+                    if isinstance(first, list):
+                        return _to_float4(first)   # [[...]]
+                    return _to_float4(v)            # [...]
         return None
 
     if isinstance(obj, list):
         if obj and isinstance(obj[0], list):
-            return _as_float4(obj[0])
-        return _as_float4(obj)
+            return _to_float4(obj[0])   # [[...]]
+        return _to_float4(obj)          # [...]
 
     return None
 
 
-def _parse_csv(s: str):
+def _parse_csv(text: str):
     """
-    Parse CSV (or whitespace-separated) numeric payloads.
-    - tolerates newlines (takes the last non-empty line)
-    - tolerates header lines (header won't parse to float, so it will fall through)
-    - splits on commas OR whitespace
+    Parse a CSV (or whitespace-separated) numeric payload.
+    • Tolerates newlines — uses the last non-empty line (skips any header).
+    • Splits on commas or whitespace.
+    Returns a list of 4 floats, or None.
     """
-    s = (s or "").strip()
-    if not s:
+    text = (text or "").strip()
+    if not text:
         return None
 
-    lines = [ln.strip() for ln in s.splitlines() if ln.strip()]
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
     if not lines:
         return None
 
-    # If the request accidentally includes header + data, last line is typically the data row.
+    # Last line is the data row when a header line accidentally appears
     last = lines[-1]
-
-    # Split on comma or whitespace (handles: "1,2,3,4" or "1 2 3 4")
     parts = [p.strip() for p in re.split(r"[,\s]+", last) if p.strip()]
+
     if len(parts) < 4:
         return None
-
     try:
         return [float(parts[0]), float(parts[1]), float(parts[2]), float(parts[3])]
-    except Exception:
+    except (TypeError, ValueError):
         return None
 
+
+def _safe_get(obj, *attrs, default=None):
+    """Read the first truthy attribute found on obj."""
+    for attr in attrs:
+        v = getattr(obj, attr, None)
+        if v is not None:
+            return v
+    return default
+
+
+# ── Main handler ───────────────────────────────────────────────────────────────
 
 def preprocess_handler(inference_record, logger=None):
     """
-    REQUIRED by SageMaker Model Monitor.
-    Must return:
-      - dict representing one row, OR
-      - [] to skip.
+    Required entry point for SageMaker Model Monitor.
 
-    We intentionally DO NOT skip unparseable records. We emit NaNs to keep schema stable
-    and avoid "Number of columns in current dataset: 0".
+    Returns:
+        dict  — one row with keys matching FEATURES
+        []    — to skip the record (we avoid skipping to keep schema stable)
     """
-    # Read endpoint input record
+    # ── 1. Read the captured endpoint input ───────────────────────────────────
     try:
-        ep_in = inference_record.endpoint_input
-    except Exception as e:
+        ep_input = inference_record.endpoint_input
+    except Exception as exc:
         if logger:
-            logger.warning(f"Cannot read endpoint_input: {e}")
+            logger.warning(f"[preprocessor] Cannot read endpoint_input: {exc}")
         return _nan_row()
 
-    data = _get_attr(ep_in, "data")
+    data = _safe_get(ep_input, "data")
     if data is None:
         return _nan_row()
 
-    # Content-Type: in capture records this often appears as observedContentType
+    # ── 2. Resolve content-type and encoding ──────────────────────────────────
     content_type = (
-        _get_attr(ep_in, "content_type", "observed_content_type", "observedContentType", default="") or ""
+        _safe_get(ep_input, "content_type", "observed_content_type", "observedContentType", default="") or ""
     ).lower()
 
-    # Encoding: may be BASE64 for captured payloads
-    encoding = (_get_attr(ep_in, "encoding", default="") or "").upper()
+    encoding = (
+        _safe_get(ep_input, "encoding", default="") or ""
+    ).upper()
 
-    # bytes -> str
+    # ── 3. Bytes → str ────────────────────────────────────────────────────────
     if isinstance(data, (bytes, bytearray)):
         data = data.decode("utf-8", errors="ignore")
 
-    # BASE64 decode if needed
+    # ── 4. Base64 decode if SageMaker encoded the captured payload ────────────
     if encoding == "BASE64" and isinstance(data, str):
         try:
             data = base64.b64decode(data).decode("utf-8", errors="ignore")
-        except Exception as e:
+        except Exception as exc:
             if logger:
-                logger.warning(f"BASE64 decode failed: {e}")
+                logger.warning(f"[preprocessor] BASE64 decode failed: {exc}")
             return _nan_row()
 
+    # ── 5. Parse ──────────────────────────────────────────────────────────────
     values = None
 
-    # Parse JSON
     if "json" in content_type:
         try:
             obj = json.loads(data) if isinstance(data, str) else data
         except Exception:
-            obj = data  # if already dict/list
-        values = _parse_json_any(obj)
+            obj = data
+        values = _parse_json(obj)
     else:
-        # Parse CSV
+        # Default: treat as CSV (covers text/csv and unknown content types)
         if isinstance(data, str):
             values = _parse_csv(data)
+        elif isinstance(data, (list, tuple)):
+            values = _to_float4(data)
 
-    # If unparseable: emit NaNs (do NOT skip)
+    # ── 6. Fallback to NaN on parse failure ───────────────────────────────────
     if values is None:
         if logger:
             logger.warning(
-                f"Unparseable record -> emitting NaNs. ct={content_type} enc={encoding} sample={str(data)[:200]}"
+                f"[preprocessor] Unparseable record → NaN row. "
+                f"content_type={content_type!r} encoding={encoding!r} "
+                f"sample={str(data)[:200]!r}"
             )
         return _nan_row()
 
-    # Build stable output schema
+    # ── 7. Return stable schema ───────────────────────────────────────────────
     return {
         FEATURES[0]: values[0],
         FEATURES[1]: values[1],
