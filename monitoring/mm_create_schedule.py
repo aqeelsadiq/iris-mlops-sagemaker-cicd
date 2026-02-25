@@ -154,8 +154,10 @@ import time
 import boto3
 import sagemaker
 from botocore.exceptions import ClientError
-from sagemaker.model_monitor import DefaultModelMonitor, EndpointInput
-
+try:
+    from sagemaker.model_monitor import DefaultModelMonitor, EndpointInput
+except Exception:
+    from sagemaker.model_monitoring import DefaultModelMonitor, EndpointInput
 
 def parse_args():
     p = argparse.ArgumentParser()

@@ -100,9 +100,13 @@ import argparse
 import os
 import boto3
 import sagemaker
-from sagemaker.model_monitor import DefaultModelMonitor
 from sagemaker.s3 import S3Uploader
-
+try:
+    # Newer SDKs
+    from sagemaker.model_monitor import DefaultModelMonitor
+except Exception:
+    # Older SDKs
+    from sagemaker.model_monitoring import DefaultModelMonitor
 
 def parse_args():
     p = argparse.ArgumentParser()
