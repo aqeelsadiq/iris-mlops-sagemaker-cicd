@@ -117,46 +117,39 @@
 
 
 #claude code
-name: SageMaker Model Monitor (Iris) - Production
+name: Setup Model Monitoring (Iris)
 
 on:
   workflow_dispatch:
 
 jobs:
-  model_monitor:
+  monitoring:
     runs-on: ubuntu-latest
 
     env:
       AWS_REGION: us-east-1
 
-      # Endpoint + IAM role
       ENDPOINT_NAME: iris-endpoint
+      SCHEDULE_NAME: aqeel-iris-model-monitor
+
+      # Your execution role
       SAGEMAKER_EXEC_ROLE_ARN: arn:aws:iam::387867038403:role/AqeelIrisSageMakerExecutionRole
 
-      # S3 bucket and paths
-      S3_BUCKET: sagemaker-aqeel-iris-us-east-1-387867038403
+      # S3 paths (update if needed)
       DATACAPTURE_S3_URI: s3://sagemaker-aqeel-iris-us-east-1-387867038403/monitoring/datacapture/
-      BASELINE_DATASET_S3_URI: s3://sagemaker-aqeel-iris-us-east-1-387867038403/datasets/iris/baseline/features.csv
+      BASELINE_DATA_S3_URI: s3://sagemaker-aqeel-iris-us-east-1-387867038403/data/features.csv
       BASELINE_OUTPUT_S3_URI: s3://sagemaker-aqeel-iris-us-east-1-387867038403/monitoring/baseline/
-      REPORTS_S3_URI: s3://sagemaker-aqeel-iris-us-east-1-387867038403/monitoring/reports/
+      REPORTS_OUTPUT_S3_URI: s3://sagemaker-aqeel-iris-us-east-1-387867038403/monitoring/reports/
+      PREPROCESSOR_S3_PREFIX: s3://sagemaker-aqeel-iris-us-east-1-387867038403/monitoring/scripts/
 
-      # ✅ Preprocessor script — uploaded to S3 by mm_create_baseline.py
-      #    MUST be the same URI passed to both baseline AND schedule steps
-      PREPROCESSOR_LOCAL_PATH: ./monitoring/record_preprocessor.py
-      PREPROCESSOR_S3_URI: s3://sagemaker-aqeel-iris-us-east-1-387867038403/monitoring/scripts/record_preprocessor.py
-
-      # Monitoring schedule
-      SCHEDULE_NAME: aqeel-iris-model-monitor
-      CRON: "cron(0 * ? * * *)"
-      PROCESSING_INSTANCE_TYPE: ml.t3.xlarge
-
-      # Drift alerting
-      SNS_TOPIC_NAME: aqeel-iris-drift-alerts
+      # alerts
+      SNS_TOPIC_NAME: aqeel-iris-monitor-alerts
       ALERT_EMAIL: aqeel.sadiq3456@gmail.com
 
-    steps:
-      # ── Setup ────────────────────────────────────────────────────────────────
+      # schedule
+      CRON_EXPR: cron(0 * ? * * *)   # every 5 minutes (your example)
 
+    steps:
       - name: Checkout
         uses: actions/checkout@v4
 
@@ -167,7 +160,7 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -175,71 +168,50 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r monitoring/requirements.txt
+          pip install boto3 sagemaker
 
-      # ── Step 1: Enable Data Capture ──────────────────────────────────────────
-      # Idempotent — creates a new EndpointConfig with DataCapture enabled
-      # and updates the endpoint to use it. Captures both Input + Output.
-
-      - name: Enable Data Capture on Endpoint
+      - name: Enable Data Capture
         run: |
           python monitoring/enable_data_capture.py \
-            --region           "${{ env.AWS_REGION }}" \
-            --endpoint-name    "${{ env.ENDPOINT_NAME }}" \
-            --capture-s3-uri   "${{ env.DATACAPTURE_S3_URI }}" \
+            --region "$AWS_REGION" \
+            --endpoint-name "$ENDPOINT_NAME" \
+            --capture-s3-uri "$DATACAPTURE_S3_URI" \
             --sampling-percentage 100
 
-      # ── Step 2: Create Baseline ───────────────────────────────────────────────
-      # Uploads record_preprocessor.py to S3, then runs suggest_baseline()
-      # using the same preprocessor so baseline column schema matches live data.
-      # Outputs: statistics.json + constraints.json → BASELINE_OUTPUT_S3_URI
-
-      - name: Create Baseline (statistics + constraints)
+      - name: Create Baseline (writes statistics.json + constraints.json)
         run: |
           python monitoring/mm_create_baseline.py \
-            --region                  "${{ env.AWS_REGION }}" \
-            --role-arn                "${{ env.SAGEMAKER_EXEC_ROLE_ARN }}" \
-            --baseline-data-s3-uri    "${{ env.BASELINE_DATASET_S3_URI }}" \
-            --baseline-output-s3-uri  "${{ env.BASELINE_OUTPUT_S3_URI }}" \
-            --preprocessor-local-path "${{ env.PREPROCESSOR_LOCAL_PATH }}" \
-            --preprocessor-s3-uri     "s3://${{ env.S3_BUCKET }}/monitoring/scripts/" \
-            --instance-type           "${{ env.PROCESSING_INSTANCE_TYPE }}" \
-            --instance-count          1
-
-      # ── Step 3: Create Monitoring Schedule ───────────────────────────────────
-      # Deletes any existing schedule and recreates it.
-      # Uses the SAME preprocessor S3 URI as the baseline step — this is critical.
+            --region "$AWS_REGION" \
+            --role-arn "$SAGEMAKER_EXEC_ROLE_ARN" \
+            --baseline-data-s3-uri "$BASELINE_DATA_S3_URI" \
+            --baseline-output-s3-uri "$BASELINE_OUTPUT_S3_URI" \
+            --preprocessor-local-path "./monitoring/record_preprocessor.py" \
+            --preprocessor-s3-prefix "$PREPROCESSOR_S3_PREFIX" \
+            --instance-type "ml.t3.xlarge" \
+            --instance-count 1
 
       - name: Create Monitoring Schedule
         run: |
           python monitoring/mm_create_schedule.py \
-            --region                 "${{ env.AWS_REGION }}" \
-            --role-arn               "${{ env.SAGEMAKER_EXEC_ROLE_ARN }}" \
-            --endpoint-name          "${{ env.ENDPOINT_NAME }}" \
-            --schedule-name          "${{ env.SCHEDULE_NAME }}" \
-            --baseline-s3-uri        "${{ env.BASELINE_OUTPUT_S3_URI }}" \
-            --monitor-output-s3-uri  "${{ env.REPORTS_S3_URI }}" \
-            --datacapture-s3-uri     "${{ env.DATACAPTURE_S3_URI }}" \
-            --preprocessor-s3-uri    "${{ env.PREPROCESSOR_S3_URI }}" \
-            --cron                   "${{ env.CRON }}" \
-            --instance-type          "${{ env.PROCESSING_INSTANCE_TYPE }}" \
-            --instance-count         1 \
-            --volume-size            50 \
-            --max-runtime            1800
+            --region "$AWS_REGION" \
+            --role-arn "$SAGEMAKER_EXEC_ROLE_ARN" \
+            --endpoint-name "$ENDPOINT_NAME" \
+            --schedule-name "$SCHEDULE_NAME" \
+            --baseline-s3-uri "$BASELINE_OUTPUT_S3_URI" \
+            --monitor-output-s3-uri "$REPORTS_OUTPUT_S3_URI" \
+            --preprocessor-s3-uri "${PREPROCESSOR_S3_PREFIX%/}/record_preprocessor.py" \
+            --cron "$CRON_EXPR" \
+            --instance-type "ml.t3.xlarge" \
+            --instance-count 1
 
-      # ── Step 4: Create Drift Alarms ───────────────────────────────────────────
-      # Creates CloudWatch alarms (one per feature) + SNS email subscription.
-      #  Confirm the subscription email that arrives in your inbox (once only).
-
-      - name: Create Drift Alarms (CloudWatch + SNS)
+      - name: Create Constraint Violation Alarm (Email)
         run: |
-          python monitoring/mm_create_drift_alarm.py \
-            --region          "${{ env.AWS_REGION }}" \
-            --schedule-name   "${{ env.SCHEDULE_NAME }}" \
-            --endpoint-name   "${{ env.ENDPOINT_NAME }}" \
-            --sns-topic-name  "${{ env.SNS_TOPIC_NAME }}" \
-            --email           "${{ env.ALERT_EMAIL }}" \
-            --features        "sepal_length,sepal_width,petal_length,petal_width" \
-            --period          3600 \
-            --eval-periods    1 \
-            --threshold       1.0
+          python monitoring/mm_create_constraints_alarm.py \
+            --region "$AWS_REGION" \
+            --endpoint-name "$ENDPOINT_NAME" \
+            --schedule-name "$SCHEDULE_NAME" \
+            --sns-topic-name "$SNS_TOPIC_NAME" \
+            --email "$ALERT_EMAIL" \
+            --period 300 \
+            --eval-periods 1 \
+            --threshold 1

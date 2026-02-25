@@ -91,22 +91,12 @@ mm_create_baseline.py
 ---------------------
 Creates a Data Quality baseline using SageMaker Model Monitor.
 
-KEY FIX: The same record_preprocessor.py used by the monitoring schedule
-MUST also be used here so that baseline statistics/constraints are computed
-with the same column schema as live captured data.
-
-Usage:
-    python monitoring/mm_create_baseline.py \
-        --region us-east-1 \
-        --role-arn arn:aws:iam::123456789012:role/SageMakerRole \
-        --baseline-data-s3-uri s3://my-bucket/datasets/iris/features.csv \
-        --baseline-output-s3-uri s3://my-bucket/monitoring/baseline/ \
-        --preprocessor-local-path ./monitoring/record_preprocessor.py \
-        --preprocessor-s3-uri s3://my-bucket/monitoring/scripts/
+Important:
+- Uses the SAME record_preprocessor script as schedule
+- Uploads record_preprocessor.py to S3 and returns its S3 URI
 """
 
 import argparse
-import json
 import os
 import boto3
 import sagemaker
@@ -119,33 +109,27 @@ def parse_args():
     p.add_argument("--region", required=True)
     p.add_argument("--role-arn", required=True)
 
-    p.add_argument("--baseline-data-s3-uri", required=True,
-                   help="S3 URI of features.csv (with header) for baseline")
-    p.add_argument("--baseline-output-s3-uri", required=True,
-                   help="S3 URI prefix where statistics.json & constraints.json will be written")
+    p.add_argument("--baseline-data-s3-uri", required=True)
+    p.add_argument("--baseline-output-s3-uri", required=True)
 
-    # ── Preprocessor (REQUIRED — must match the schedule) ────────────────────
-    p.add_argument("--preprocessor-local-path",
-                   default="./monitoring/record_preprocessor.py",
-                   help="Local path to record_preprocessor.py")
-    p.add_argument("--preprocessor-s3-uri", required=True,
-                   help="S3 URI prefix where the preprocessor script will be uploaded")
+    # local script + where to upload it
+    p.add_argument("--preprocessor-local-path", default="./monitoring/record_preprocessor.py")
+    p.add_argument("--preprocessor-s3-prefix", required=True)  # prefix folder
 
     p.add_argument("--instance-type", default="ml.m5.large")
     p.add_argument("--instance-count", type=int, default=1)
     return p.parse_args()
 
 
-def upload_preprocessor(local_path: str, s3_uri_prefix: str, sm_sess) -> str:
-    """Upload the preprocessor script to S3 and return its S3 URI."""
+def upload_preprocessor(local_path: str, s3_prefix: str, sm_sess) -> str:
     if not os.path.isfile(local_path):
-        raise FileNotFoundError(
-            f"Preprocessor script not found: {local_path}\n"
-            "Make sure you run this from the project root directory."
-        )
+        raise FileNotFoundError(f"Preprocessor not found: {local_path}")
+
+    # Upload as a single object under prefix
+    desired = s3_prefix.rstrip("/") + "/record_preprocessor.py"
     s3_uri = S3Uploader.upload(
         local_path=local_path,
-        desired_s3_uri=s3_uri_prefix.rstrip("/"),
+        desired_s3_uri=desired,
         sagemaker_session=sm_sess,
     )
     print(f"✅ Uploaded preprocessor to: {s3_uri}")
@@ -158,14 +142,10 @@ def main():
     boto_sess = boto3.Session(region_name=args.region)
     sm_sess = sagemaker.Session(boto_session=boto_sess)
 
-    # ── 1. Upload the preprocessor script to S3 ───────────────────────────────
     preprocessor_s3_uri = upload_preprocessor(
-        local_path=args.preprocessor_local_path,
-        s3_uri_prefix=args.preprocessor_s3_uri,
-        sm_sess=sm_sess,
+        args.preprocessor_local_path, args.preprocessor_s3_prefix, sm_sess
     )
 
-    # ── 2. Create the monitor instance ────────────────────────────────────────
     monitor = DefaultModelMonitor(
         role=args.role_arn,
         instance_count=args.instance_count,
@@ -175,27 +155,20 @@ def main():
         max_runtime_in_seconds=3600,
     )
 
-    # ── 3. Run baseline job ───────────────────────────────────────────────────
-    print("\n▶ Creating baseline (this may take 5–10 minutes)...")
-    print(f"  Input data  : {args.baseline_data_s3_uri}")
-    print(f"  Output      : {args.baseline_output_s3_uri}")
-    print(f"  Preprocessor: {preprocessor_s3_uri}")
-
+    print("▶ Creating baseline...")
     monitor.suggest_baseline(
         baseline_dataset=args.baseline_data_s3_uri,
         dataset_format={"csv": {"header": True}},
-        output_s3_uri=args.baseline_output_s3_uri,
-        # ✅ CRITICAL FIX: use the same preprocessor as the monitoring schedule
+        output_s3_uri=args.baseline_output_s3_uri.rstrip("/") + "/",
         record_preprocessor_script=preprocessor_s3_uri,
-        post_analytics_processor_script=None,
         wait=True,
         logs=True,
     )
 
-    print("\n✅ Baseline job complete.")
-    print(f"   statistics.json  → {args.baseline_output_s3_uri.rstrip('/')}/statistics.json")
-    print(f"   constraints.json → {args.baseline_output_s3_uri.rstrip('/')}/constraints.json")
-    print("\nNext step: run mm_create_schedule.py")
+    print("\n✅ Baseline created.")
+    print(f"   statistics.json  : {args.baseline_output_s3_uri.rstrip('/')}/statistics.json")
+    print(f"   constraints.json : {args.baseline_output_s3_uri.rstrip('/')}/constraints.json")
+    print(f"   preprocessor_s3_uri: {preprocessor_s3_uri}")
 
 
 if __name__ == "__main__":

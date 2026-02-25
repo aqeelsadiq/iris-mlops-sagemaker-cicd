@@ -84,70 +84,52 @@
 """
 enable_data_capture.py
 ----------------------
-Enables SageMaker Data Capture on an existing endpoint by creating a new
-EndpointConfig (with DataCaptureConfig) and updating the endpoint to use it.
-
-Usage:
-    python monitoring/enable_data_capture.py \
-        --region us-east-1 \
-        --endpoint-name my-endpoint \
-        --capture-s3-uri s3://my-bucket/datacapture \
-        --sampling-percentage 100
+Enable Data Capture on an existing endpoint by creating a new EndpointConfig
+(with DataCaptureConfig) and updating the endpoint to use it.
 """
 
 import argparse
 import hashlib
 import boto3
+from botocore.exceptions import ClientError
 
 
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--region", required=True)
     p.add_argument("--endpoint-name", required=True)
-    p.add_argument("--capture-s3-uri", required=True,
-                   help="S3 URI where captured data will be stored, e.g. s3://bucket/datacapture")
-    p.add_argument("--sampling-percentage", type=int, default=100,
-                   help="Percentage of requests to capture (default: 100)")
+    p.add_argument("--capture-s3-uri", required=True)
+    p.add_argument("--sampling-percentage", type=int, default=100)
     return p.parse_args()
 
 
 def stable_config_name(endpoint_name: str, capture_s3_uri: str, sampling: int) -> str:
-    """Generate a deterministic, idempotent EndpointConfig name."""
-    h = hashlib.sha1(
-        f"{endpoint_name}|{capture_s3_uri}|{sampling}".encode("utf-8")
-    ).hexdigest()[:8]
-    # SageMaker names: max 63 chars, alphanumeric + hyphens
-    base = f"{endpoint_name}-dc-{h}"
-    return base[:63]
+    h = hashlib.sha1(f"{endpoint_name}|{capture_s3_uri}|{sampling}".encode("utf-8")).hexdigest()[:8]
+    return f"{endpoint_name}-dc-{h}"[:63]
 
 
 def main():
     args = parse_args()
     sm = boto3.client("sagemaker", region_name=args.region)
 
-    # 1. Fetch current endpoint config
     ep = sm.describe_endpoint(EndpointName=args.endpoint_name)
     current_cfg_name = ep["EndpointConfigName"]
     cfg = sm.describe_endpoint_config(EndpointConfigName=current_cfg_name)
 
-    new_cfg_name = stable_config_name(
-        args.endpoint_name, args.capture_s3_uri, args.sampling_percentage
-    )
+    new_cfg_name = stable_config_name(args.endpoint_name, args.capture_s3_uri, args.sampling_percentage)
 
-    # 2. Create new config with DataCapture (idempotent)
     try:
         sm.describe_endpoint_config(EndpointConfigName=new_cfg_name)
-        print(f"✅ EndpointConfig already exists (no-op): {new_cfg_name}")
-    except sm.exceptions.ClientError:
+        exists = True
+    except ClientError:
+        exists = False
+
+    if not exists:
         data_capture_config = {
             "EnableCapture": True,
             "InitialSamplingPercentage": args.sampling_percentage,
-            "DestinationS3Uri": args.capture_s3_uri,
-            # Capture BOTH input and output so Model Monitor has full data
-            "CaptureOptions": [
-                {"CaptureMode": "Input"},
-                {"CaptureMode": "Output"},
-            ],
+            "DestinationS3Uri": args.capture_s3_uri.rstrip("/"),
+            "CaptureOptions": [{"CaptureMode": "Input"}, {"CaptureMode": "Output"}],
             "CaptureContentTypeHeader": {
                 "CsvContentTypes": ["text/csv"],
                 "JsonContentTypes": ["application/json"],
@@ -160,24 +142,21 @@ def main():
             "DataCaptureConfig": data_capture_config,
         }
 
-        # Preserve optional configs from the original endpoint config
         for key in ("KmsKeyId", "AsyncInferenceConfig", "ExplainerConfig", "ShadowProductionVariants"):
             if key in cfg:
                 create_kwargs[key] = cfg[key]
 
         sm.create_endpoint_config(**create_kwargs)
         print(f"✅ Created EndpointConfig with DataCapture: {new_cfg_name}")
-
-    # 3. Update endpoint only if config has changed
-    if current_cfg_name != new_cfg_name:
-        sm.update_endpoint(
-            EndpointName=args.endpoint_name,
-            EndpointConfigName=new_cfg_name,
-        )
-        print(f"✅ Endpoint update started: {args.endpoint_name} → {new_cfg_name}")
-        print("   Wait for endpoint status to become 'InService' before running baseline/schedule.")
     else:
-        print("✅ Data capture already enabled on the current config — no update needed.")
+        print(f"✅ EndpointConfig already exists: {new_cfg_name}")
+
+    if current_cfg_name != new_cfg_name:
+        sm.update_endpoint(EndpointName=args.endpoint_name, EndpointConfigName=new_cfg_name)
+        print(f"✅ Endpoint update started: {args.endpoint_name} → {new_cfg_name}")
+        print("   Wait until endpoint is InService before baseline/schedule.")
+    else:
+        print("✅ Endpoint already using DataCapture-enabled config.")
 
 
 if __name__ == "__main__":
